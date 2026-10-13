@@ -1,5 +1,6 @@
 -- Engine.lua: turns a guide into ordered steps, and remembers which ones are done.
--- A quest becomes three steps (accept, complete, turn in) so progress is real.
+-- An outdoor quest becomes three steps (accept, complete, turn in).
+-- A dungeon becomes every accept, one clear, then one turn-in at a time.
 -- Step indexes stay stable when the spec filter changes; filtered steps are
 -- marked invisible instead of being removed.
 local _, SG = ...
@@ -23,6 +24,7 @@ local KIND_TITLE = {
     accept = "Accept",
     complete = "Complete",
     turnin = "Turn in",
+    run = "Run",
     travel = "Travel",
     note = "Note",
 }
@@ -51,9 +53,39 @@ local function Step(fields)
     return fields
 end
 
+local function StartPin(quest)
+    local map, x, y, where = quest.map, quest.x, quest.y, quest.where
+    if SG.Route and SG.Route.StartOf and quest.id then
+        local smap, sx, sy, swhere = SG.Route.StartOf(quest.id)
+        if not (map and x and y) and smap and sx and sy then
+            map, x, y = smap, sx, sy
+        end
+        if type(swhere) == "string" and swhere ~= "" then
+            if type(where) ~= "string" or where == "" or where:find("not known yet", 1, true) then
+                where = swhere
+            end
+        end
+    end
+    return map, x, y, where
+end
+
+local function TurnPin(quest)
+    local map, x, y = quest.map, quest.x, quest.y
+    local who = SG.Engine.Giver(quest.where)
+    if SG.Route and SG.Route.TurnIn and quest.id then
+        local tmap, tx, ty, tname = SG.Route.TurnIn(quest.id)
+        if tmap and tx and ty then
+            map, x, y = tmap, tx, ty
+            if type(tname) == "string" and tname ~= "" then who = tname end
+        end
+    end
+    return map, x, y, who
+end
+
 local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
     local match = SG.BiS.Match(quest, guide.side)
-    local giver = SG.Engine.Giver(quest.where)
+    local startMap, startX, startY, where = StartPin(quest)
+    local giver = SG.Engine.Giver(where)
     local from = giver and (" from " .. giver) or ""
     local place = quest.zone or segment.zone or segment.title
     if gaps and prevLevel and quest.level and (quest.level - prevLevel) >= 4 then
@@ -69,15 +101,15 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
                 "Optional. The next quest is level %d. Keep questing in %s until you are close, then pick it up. No grind is required if you are already there.",
                 quest.level, place
             ),
-            map = quest.map, x = quest.x, y = quest.y,
+            map = startMap, x = startX, y = startY,
         })
     end
     local shared = {
         questID = quest.id,
         questName = quest.name,
-        map = quest.map,
-        x = quest.x,
-        y = quest.y,
+        map = startMap,
+        x = startX,
+        y = startY,
         zone = place,
         segment = segment.title,
         rewards = quest.rewards,
@@ -85,11 +117,11 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         level = quest.level,
         match = match,
     }
-    local function add(kind, title, text)
+    local function add(kind, title, text, pinMap, pinX, pinY)
         -- Copy. The three steps must not share one table.
         local row = Step({
             questID = shared.questID, questName = shared.questName,
-            map = shared.map, x = shared.x, y = shared.y,
+            map = pinMap or shared.map, x = pinX or shared.x, y = pinY or shared.y,
             zone = shared.zone, segment = shared.segment,
             rewards = shared.rewards, choice = shared.choice, level = shared.level,
             match = shared.match,
@@ -103,9 +135,11 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         string.format("Accept %s%s.", quest.name, from))
     add("complete", "Complete: " .. quest.name,
         string.format("Finish the objectives for %s.", quest.name))
-    local turn = giver and (" to " .. giver) or ""
+    local turnMap, turnX, turnY, turnWho = TurnPin(quest)
+    local turn = turnWho and (" to " .. turnWho) or ""
     add("turnin", "Turn in: " .. quest.name,
-        string.format("Turn in %s%s.", quest.name, turn))
+        string.format("Turn in %s%s.", quest.name, turn),
+        turnMap, turnX, turnY)
 end
 
 -- Starting-zone quests are not in the BiS catalog. They stay on the route so
@@ -281,7 +315,7 @@ local function ApplyVisibility(steps)
     local segmentLive = {}
     for i = 1, #steps do
         local step = steps[i]
-        if step.visible and step.questID then
+        if step.visible and (step.questID or step.kind == "run") then
             segmentLive[step.segment or ""] = true
         end
     end
@@ -336,6 +370,138 @@ local function AddFarmSteps(steps, dungeonSet)
     end
 end
 
+local function CopyFields(quest, level)
+    local copy = {}
+    for k, v in pairs(quest) do copy[k] = v end
+    if level then copy.level = level end
+    return copy
+end
+
+local function StartsInside(quest)
+    if quest.inside then return true end
+    if quest.map and quest.x and quest.y then return false end
+    if SG.Route and SG.Route.StartOf and quest.id then
+        local smap, sx, sy = SG.Route.StartOf(quest.id)
+        if smap and sx and sy then return false end
+    end
+    return true
+end
+
+-- Accept every dungeon quest first, clear them as one step, then turn them
+-- in one at a time. A follow-up the journal lists under another quest comes
+-- after those turn-ins, because it cannot be picked up before the clear.
+local function AddDungeon(steps, def, segment)
+    local level = segment.level
+    local quests = segment.quests or {}
+    local outdoor, inside = {}, {}
+    for q = 1, #quests do
+        local quest = quests[q]
+        if type(quest) == "table" and quest.id and quest.name then
+            local match = SG.BiS.Match(quest, def.side)
+            if match ~= "hide" then
+                local row = { quest = quest, match = match }
+                if StartsInside(quest) then
+                    inside[#inside + 1] = row
+                else
+                    outdoor[#outdoor + 1] = row
+                end
+            end
+        end
+    end
+    local ordered = {}
+    for i = 1, #outdoor do ordered[#ordered + 1] = outdoor[i] end
+    for i = 1, #inside do ordered[#ordered + 1] = inside[i] end
+    local place = segment.zone or segment.title
+    local emap, ex, ey
+    if SG.Route and SG.Route.DungeonEntrance then
+        emap, ex, ey = SG.Route.DungeonEntrance(segment.dungeon)
+    end
+    if not (emap and ex and ey) and segment.arrive then
+        emap, ex, ey = segment.arrive.map, segment.arrive.x, segment.arrive.y
+    end
+    if #ordered > 0 then
+        for i = 1, #ordered do
+            local quest = ordered[i].quest
+            local map, x, y, where = StartPin(quest)
+            local text
+            if StartsInside(quest) then
+                map, x, y = emap, ex, ey
+                local note = quest.where
+                if type(note) ~= "string" or note == "" or note:find("not known yet", 1, true) then
+                    note = where
+                end
+                if type(note) == "string" and note ~= "" and not note:find("not known yet", 1, true) then
+                    text = string.format("Accept %s. %s", quest.name, note)
+                else
+                    text = string.format("Accept %s. It starts inside %s.", quest.name, segment.dungeon)
+                end
+            else
+                local giver = SG.Engine.Giver(where)
+                local from = giver and (" from " .. giver) or ""
+                text = string.format("Accept %s%s.", quest.name, from)
+            end
+            steps[#steps + 1] = Step({
+                kind = "accept",
+                questID = quest.id,
+                questName = quest.name,
+                map = map, x = x, y = y,
+                zone = place,
+                segment = segment.title,
+                rewards = quest.rewards,
+                choice = quest.choice,
+                level = level or quest.level,
+                match = ordered[i].match,
+                title = "Accept: " .. quest.name,
+                text = text,
+            })
+        end
+        local runs, names = {}, {}
+        for i = 1, #ordered do
+            local quest = ordered[i].quest
+            runs[#runs + 1] = { id = quest.id, match = ordered[i].match, name = quest.name }
+            names[#names + 1] = quest.name
+        end
+        local list = table.concat(names, ", ")
+        steps[#steps + 1] = Step({
+            kind = "run",
+            runs = runs,
+            segment = segment.title,
+            zone = place,
+            level = level,
+            match = "bis",
+            map = emap, x = ex, y = ey,
+            title = "Run " .. segment.dungeon,
+            text = "Finish every objective for this dungeon, then turn the quests in. " .. list .. ".",
+        })
+        for i = 1, #ordered do
+            local quest = ordered[i].quest
+            local turnMap, turnX, turnY, turnWho = TurnPin(quest)
+            local turn = turnWho and (" to " .. turnWho) or ""
+            steps[#steps + 1] = Step({
+                kind = "turnin",
+                questID = quest.id,
+                questName = quest.name,
+                map = turnMap, x = turnX, y = turnY,
+                zone = place,
+                segment = segment.title,
+                rewards = quest.rewards,
+                choice = quest.choice,
+                level = level or quest.level,
+                match = ordered[i].match,
+                title = "Turn in: " .. quest.name,
+                text = string.format("Turn in %s%s.", quest.name, turn),
+            })
+        end
+    end
+    local after = segment.after or {}
+    for a = 1, #after do
+        local quest = after[a]
+        if type(quest) == "table" and quest.id and quest.name then
+            AddQuest(steps, def, segment, CopyFields(quest, level or quest.level), nil, false)
+        end
+    end
+end
+
 function SG.Engine.Compile(def)
     local steps = {}
     local segments = def.segments or {}
@@ -365,13 +531,37 @@ function SG.Engine.Compile(def)
             AddPlain(steps, def, segment, plain[q], prev, gaps)
             prev = plain[q].level or prev
         end
-        local quests = segment.quests or {}
-        for q = 1, #quests do
-            local entry = quests[q]
-            local quest = type(entry) == "table" and entry or SG.BiS.Quest(entry)
-            if quest then
-                AddQuest(steps, def, segment, quest, prev, gaps)
-                prev = quest.level or prev
+        if segment.dungeon then
+            local leads, rest = {}, {}
+            local bundled = segment.quests or {}
+            for q = 1, #bundled do
+                local entry = bundled[q]
+                if type(entry) == "table" and entry.leadIn then
+                    leads[#leads + 1] = entry
+                else
+                    rest[#rest + 1] = entry
+                end
+            end
+            for q = 1, #leads do
+                AddQuest(steps, def, segment, leads[q], prev, gaps)
+                prev = leads[q].level or prev
+            end
+            local block = segment
+            if #leads > 0 then
+                block = {}
+                for k, v in pairs(segment) do block[k] = v end
+                block.quests = rest
+            end
+            AddDungeon(steps, def, block)
+        else
+            local quests = segment.quests or {}
+            for q = 1, #quests do
+                local entry = quests[q]
+                local quest = type(entry) == "table" and entry or SG.BiS.Quest(entry)
+                if quest then
+                    AddQuest(steps, def, segment, quest, prev, gaps)
+                    prev = quest.level or prev
+                end
             end
         end
         local extras = segment.extras or {}
@@ -674,6 +864,38 @@ local function AutoDone(step, completed, inLog, objectives)
     return false
 end
 
+function SG.Engine.RunFinished(step)
+    local runs = step and step.runs
+    if type(runs) ~= "table" or #runs == 0 then return true end
+    local only = SG.db and SG.db.options and SG.db.options.onlyMySpec
+    for i = 1, #runs do
+        local row = runs[i]
+        local skip = row.match == "hide" or (row.match == "other" and only)
+        if not skip then
+            local completed, inLog, objectives = SG.QuestState(row.id)
+            if not (completed or (inLog and objectives)) then return false end
+        end
+    end
+    return true
+end
+
+function SG.Engine.RunTrack(step)
+    local runs = step and step.runs
+    if type(runs) ~= "table" then return nil end
+    local only = SG.db and SG.db.options and SG.db.options.onlyMySpec
+    local first
+    for i = 1, #runs do
+        local row = runs[i]
+        local skip = row.match == "hide" or (row.match == "other" and only)
+        if not skip then
+            if not first then first = row.id end
+            local completed, inLog, objectives = SG.QuestState(row.id)
+            if not (completed or (inLog and objectives)) then return row.id end
+        end
+    end
+    return first
+end
+
 function SG.Engine.SyncGuide(guide)
     if not guide then return 0 end
     local cache = {}
@@ -681,7 +903,14 @@ function SG.Engine.SyncGuide(guide)
     local row = SG.Engine.Progress(guide.id)
     for i = 1, #guide.steps do
         local step = guide.steps[i]
-        if step.visible and step.questID then
+        if step.visible and step.kind == "run" then
+            if not (row.hold and row.hold == i) and not row.done[i] then
+                if SG.Engine.RunFinished(step) then
+                    SG.Engine.Mark(guide, i, true)
+                    marked = marked + 1
+                end
+            end
+        elseif step.visible and step.questID then
             -- Prev cleared this step on purpose. Leave it until Next or Done.
             if not (row.hold and row.hold == i) and not row.done[i] then
                 local state = cache[step.questID]

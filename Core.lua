@@ -234,6 +234,109 @@ function SG.QuestState(questID)
     return QuestFlagged(questID), QuestInLog(questID), QuestObjectivesDone(questID)
 end
 
+-- Objective rows from the quest log. Text is whatever the client returns.
+-- Counts are added only when the client gave a required number and the text
+-- does not already contain it. Nothing here invents a kill or a gather line.
+function SG.QuestLines(questID)
+    local lines = {}
+    if not questID then return lines end
+    if C_QuestLog and C_QuestLog.GetQuestObjectives then
+        local ok, objs = pcall(C_QuestLog.GetQuestObjectives, questID)
+        if ok and type(objs) == "table" then
+            for i = 1, #objs do
+                local row = objs[i]
+                if type(row) == "table" and type(row.text) == "string" and row.text ~= "" then
+                    lines[#lines + 1] = {
+                        text = row.text,
+                        finished = row.finished and true or false,
+                        numFulfilled = tonumber(row.numFulfilled),
+                        numRequired = tonumber(row.numRequired),
+                    }
+                end
+            end
+        end
+    end
+    if #lines == 0 then
+        local index
+        if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+            index = C_QuestLog.GetLogIndexForQuestID(questID)
+        elseif GetQuestLogIndexByID then
+            index = GetQuestLogIndexByID(questID)
+        end
+        if index and index > 0 and GetNumQuestLeaderBoards and GetQuestLogLeaderBoard then
+            local count = GetNumQuestLeaderBoards(index) or 0
+            for i = 1, count do
+                local text, _, finished = GetQuestLogLeaderBoard(i, index)
+                if type(text) == "string" and text ~= "" then
+                    lines[#lines + 1] = { text = text, finished = finished and true or false }
+                end
+            end
+        end
+    end
+    return lines
+end
+
+local function WithCount(row)
+    local text = row.text or ""
+    local need = row.numRequired
+    if type(need) == "number" and need > 0 then
+        local have = row.numFulfilled or 0
+        local count = string.format("%d/%d", have, need)
+        if not text:find(count, 1, true) then
+            text = count .. "  " .. text
+        end
+    end
+    return text
+end
+
+function SG.StepObjectives(step)
+    local lines = {}
+    if not step then return lines end
+    local function add(questID, name)
+        local rows = SG.QuestLines(questID)
+        if #rows == 0 then
+            local label = name or "This quest"
+            local completed, _, objectives = SG.QuestState(questID)
+            if completed or objectives then
+                lines[#lines + 1] = { text = label .. ": ready to turn in.", finished = true }
+            else
+                lines[#lines + 1] = {
+                    text = label .. ": objectives show once it is in your log.",
+                    finished = false,
+                    pending = true,
+                }
+            end
+            return
+        end
+        for i = 1, #rows do
+            local text = WithCount(rows[i])
+            if name and step.kind == "run" and not text:find(name, 1, true) then
+                text = name .. ": " .. text
+            end
+            lines[#lines + 1] = { text = text, finished = rows[i].finished and true or false }
+        end
+    end
+    if step.kind == "complete" and step.questID then
+        add(step.questID, step.questName)
+    elseif step.kind == "run" and type(step.runs) == "table" then
+        local only = SG.db and SG.db.options and SG.db.options.onlyMySpec
+        for i = 1, #step.runs do
+            local row = step.runs[i]
+            local skip = row.match == "hide" or (row.match == "other" and only)
+            if not skip then add(row.id, row.name) end
+        end
+    end
+    return lines
+end
+
+function SG.QuestProgressText(step)
+    local lines = SG.StepObjectives(step)
+    if #lines == 0 then return nil end
+    local parts = {}
+    for i = 1, #lines do parts[#parts + 1] = lines[i].text end
+    return table.concat(parts, "\n")
+end
+
 function SG.InitDB()
     if type(_G.StratagemDB) ~= "table" then _G.StratagemDB = {} end
     if type(_G.StratagemCharDB) ~= "table" then _G.StratagemCharDB = {} end
@@ -353,7 +456,7 @@ local function Slash(msg)
         SG.Engine.WaypointCurrent()
     elseif command == "arrowflip" then
         SG.db.options.invertArrow = not SG.db.options.invertArrow
-        SG.Print(SG.db.options.invertArrow and "Arrow inverted." or "Arrow set back.")
+        SG.Print(SG.db.options.invertArrow and "Arrow mirrored." or "Arrow set back.")
     elseif command == "status" then
         local spec = SG.Specs.Label(SG.Specs.Selected())
         SG.Print(spec .. ". " .. SG.BiS.Status())

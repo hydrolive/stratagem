@@ -49,7 +49,11 @@ function SG.Nav.Set(step)
         if SG.Arrow then SG.Arrow.Tick() end
         return
     end
-    SG.Nav.SuperTrack(step.questID)
+    local track = step.questID
+    if not track and step.kind == "run" and SG.Engine and SG.Engine.RunTrack then
+        track = SG.Engine.RunTrack(step)
+    end
+    SG.Nav.SuperTrack(track)
     SG.Nav.ClearTomTom()
     if TomTomOn() and step.map and step.x and step.y then
         local ok, uid = pcall(TomTom.AddWaypoint, TomTom, step.map, step.x / 100, step.y / 100, {
@@ -127,30 +131,57 @@ local function WorldXY(map, x, y)
     end
 end
 
-function SG.Nav.Measure(step)
-    if not step or not step.map or not step.x or not step.y then return nil end
-    local map, px, py = SG.Nav.PlayerPos()
-    if not map or not px or not py then return nil end
-    local hbd = HereBeDragons()
-    if hbd and hbd.GetZoneDistance then
-        local dist = hbd:GetZoneDistance(map, px, py, step.map, step.x / 100, step.y / 100)
-        if type(dist) == "number" then return dist, map end
+-- Same angle HereBeDragons uses: atan2(-dx, dy), then fold into 0..2pi.
+-- dx is east and dy is north. Distance is the length of that same vector.
+local function VectorAngle(dx, dy)
+    local atan2 = math.atan2 or math.atan
+    local angle = atan2(-dx, dy)
+    if angle > 0 then
+        angle = (math.pi * 2) - angle
+    else
+        angle = -angle
     end
+    return angle
+end
+
+-- Returns the world bearing and the yards. Both come from one vector, so
+-- walking the way the arrow points makes the distance fall.
+function SG.Nav.Bearing(step)
+    if not step or not step.map or not step.x or not step.y then return nil, nil end
+    local hbd = HereBeDragons()
+    if hbd and hbd.GetPlayerWorldPosition and hbd.GetWorldCoordinatesFromZone and hbd.GetWorldVector then
+        local x, y, instance = hbd:GetPlayerWorldPosition()
+        local destX, destY, destInst = hbd:GetWorldCoordinatesFromZone(step.x / 100, step.y / 100, step.map)
+        if x and destX and instance and destInst and instance == destInst then
+            local angle, dist = hbd:GetWorldVector(instance, x, y, destX, destY)
+            if type(angle) == "number" and type(dist) == "number" then
+                return angle, dist
+            end
+        end
+    end
+    local map, px, py = SG.Nav.PlayerPos()
+    if not map or not px or not py then return nil, nil end
     local inst1, x1, y1 = WorldXY(map, px, py)
     local inst2, x2, y2 = WorldXY(step.map, step.x / 100, step.y / 100)
     if x1 and x2 and (not inst1 or not inst2 or inst1 == inst2) then
-        local dx = x2 - x1
-        local dy = y2 - y1
-        return math.sqrt(dx * dx + dy * dy), map
+        local dx, dy = x2 - x1, y2 - y1
+        return VectorAngle(dx, dy), math.sqrt(dx * dx + dy * dy)
     end
     -- Same map, and neither HereBeDragons nor the world-position API answered.
+    -- Map y grows south, so north is the player's y minus the pin's y.
     -- 42 yards per map percent is only a stand-in so the HUD still shows a range.
     if map == step.map then
         local dx = ((step.x / 100) - px) * 4200
-        local dy = ((step.y / 100) - py) * 4200
-        return math.sqrt(dx * dx + dy * dy), map
+        local dy = (py - (step.y / 100)) * 4200
+        return VectorAngle(dx, dy), math.sqrt(dx * dx + dy * dy)
     end
-    return nil, map
+    return nil, nil
+end
+
+function SG.Nav.Measure(step)
+    local _, yards = SG.Nav.Bearing(step)
+    local map = SG.Nav.PlayerPos()
+    return yards, map
 end
 
 function SG.Nav.FormatDistance(yards)
@@ -266,37 +297,21 @@ function SG.Arrow.Tick()
         return
     end
     frame:Show()
-    local yards, playerMap = SG.Nav.Measure(step)
+    local angle, yards = SG.Nav.Bearing(step)
     local pretty = SG.Nav.FormatDistance(yards)
     frame.dist:SetText(pretty or "—")
     frame.label:SetText(step.title or step.questName or SG.Nav.CoordText(step))
     if not frame.tex.SetRotation then return end
-    local map, px, py = SG.Nav.PlayerPos()
-    if not map or not px or not py then
+    if type(angle) ~= "number" then
         frame.tex:SetRotation(0)
+        if not pretty then
+            local playerMap = SG.Nav.PlayerPos()
+            frame.dist:SetText(playerMap and "Other zone" or "—")
+        end
         return
     end
-    -- Map x grows east and map y grows south. Facing 0 is north.
-    local dx, dy
-    if map == step.map then
-        dx = (step.x / 100) - px
-        dy = (step.y / 100) - py
-    else
-        local _, x1, y1 = WorldXY(map, px, py)
-        local _, x2, y2 = WorldXY(step.map, step.x / 100, step.y / 100)
-        if not x1 or not x2 then
-            frame.tex:SetRotation(0)
-            if not pretty then frame.dist:SetText(playerMap and "Other zone" or "—") end
-            return
-        end
-        -- World positions from the map API use +x east and +y north.
-        dx = x2 - x1
-        dy = y1 - y2
-    end
-    local atan2 = math.atan2 or math.atan
-    local target = atan2(dx, -dy)
     local facing = GetPlayerFacing and GetPlayerFacing() or 0
-    local angle = Wrap(target - (facing or 0))
-    if SG.db.options.invertArrow then angle = -angle end
-    frame.tex:SetRotation(angle)
+    local turn = Wrap(angle - (facing or 0))
+    if SG.db.options.invertArrow then turn = -turn end
+    frame.tex:SetRotation(turn)
 end

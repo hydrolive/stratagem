@@ -20,7 +20,7 @@ local STARTER = {
     A = { [4] = "a-teldrassil", [3] = "a-dunmorogh", [7] = "a-dunmorogh" },
 }
 
-local ROUTE_BLURB = "One route for your faction. It follows your level and sends you to the zone whose next quest is the better piece. The ride is not treated as a cost, so the route leaves a zone and comes back when a later quest there is the next upgrade. Each catalog quest brings the earlier quests in its journal chain, so a dungeon quest is not offered until the Barrens steps that lead to it are on the list. The bundled catalog still ends in the mid 30s, so this is not every side quest in a zone. A line marked (Optional) is a dungeon farm, a gear quest that was not on the written route, or the skyborne island. Mark it done to skip it."
+local ROUTE_BLURB = "One route for your faction. It follows your level and sends you to the zone whose next quest is the better piece. The ride is not treated as a cost, so the route leaves a zone and comes back when a later quest there is the next upgrade. Each catalog quest brings the earlier quests in its journal chain, and those steps are finished before the dungeon. A dungeon is then every pickup, one clear, and one turn-in at a time. The level on that block is the journal difficulty, so an easier dungeon comes first. The bundled catalog still ends in the mid 30s, so this is not every side quest in a zone. A line marked (Optional) is a dungeon farm, a gear quest that was not on the written route, or the skyborne island. Mark it done to skip it."
 
 local BIS_SLOTS = {
     { id = 1, name = "Head" },
@@ -88,6 +88,10 @@ end
 
 local function Better(a, b)
     if a.level ~= b.level then return a.level < b.level end
+    -- Same level: finish the lead-in before the dungeon it unlocks.
+    local ap = a.dungeon and 1 or 0
+    local bp = b.dungeon and 1 or 0
+    if ap ~= bp then return ap < bp end
     if a.gear ~= b.gear then return a.gear < b.gear end
     return a.order < b.order
 end
@@ -134,6 +138,112 @@ local function JournalQuestRow(journal, id)
         end
     end
     return nil
+end
+
+local function JournalRowLevel(journal, id)
+    local row = JournalQuestRow(journal, id)
+    if row and type(row[3]) == "number" and row[3] > 0 then return row[3] end
+    return nil
+end
+
+-- The low end of the journal bracket is the difficulty used to order dungeons.
+local function DungeonBand(name)
+    local journal = Journal()
+    if not journal or type(journal.QuestData) ~= "table" or type(name) ~= "string" then return nil end
+    local want = name:lower()
+    for d = 1, #journal.QuestData do
+        local block = journal.QuestData[d]
+        if type(block) == "table" and type(block.name) == "string" and block.name:lower() == want then
+            local levels = block.levels
+            if type(levels) == "table" and type(levels[1]) == "number" and levels[1] > 0 then
+                return levels[1]
+            end
+        end
+    end
+    return nil
+end
+
+local function DungeonName(journal, title)
+    if not journal or type(journal.QuestData) ~= "table" or type(title) ~= "string" then return nil end
+    local want = title:lower()
+    for d = 1, #journal.QuestData do
+        local block = journal.QuestData[d]
+        if type(block) == "table" and type(block.name) == "string" and block.name:lower() == want then
+            return block.name
+        end
+    end
+    return nil
+end
+
+local function ContainsId(step, id)
+    if step == id then return true end
+    if type(step) ~= "table" then return false end
+    for i = 1, #step do
+        if ContainsId(step[i], id) then return true end
+    end
+    return false
+end
+
+-- A quest that only appears in another quest's follow-up list is done after
+-- that dungeon, not accepted before the clear. A journal row of the dungeon
+-- itself is not a follow-up.
+local function FollowUpDungeon(journal, id)
+    if not journal or type(journal.QuestData) ~= "table" or not id then return nil end
+    local fallback
+    for d = 1, #journal.QuestData do
+        local block = journal.QuestData[d]
+        local list = type(block) == "table" and block.quests or nil
+        if type(list) == "table" then
+            local primary, follow = false, false
+            for q = 1, #list do
+                local row = list[q]
+                if type(row) == "table" then
+                    if row[1] == id then primary = true end
+                    if row[1] ~= id and type(row.steps) == "table" and ContainsId(row.steps, id) then
+                        follow = true
+                    end
+                end
+            end
+            if primary then return nil end
+            if follow and not fallback then fallback = block.name end
+        end
+    end
+    return fallback
+end
+
+function SG.Route.DungeonLevel(name)
+    return DungeonBand(name)
+end
+
+function SG.Route.DungeonEntrance(name)
+    local ns = Namespace()
+    local journal = ns and ns.Journal
+    if not journal or not journal.Dungeons or type(name) ~= "string" then return nil end
+    local want = name:lower()
+    local list = journal.Dungeons() or {}
+    for i = 1, #list do
+        local dungeon = list[i]
+        local entrance = dungeon and dungeon.entrance
+        if dungeon and type(dungeon.name) == "string" and dungeon.name:lower() == want and type(entrance) == "table" then
+            if entrance.map and entrance.x and entrance.y then
+                return entrance.map, entrance.x, entrance.y
+            end
+        end
+    end
+    return nil
+end
+
+function SG.Route.TurnIn(id)
+    local journal = Journal()
+    local turn = journal and journal.QuestTurnIns and journal.QuestTurnIns[id]
+    if type(turn) ~= "table" then return nil end
+    return turn[1], turn[2], turn[3], turn[4]
+end
+
+function SG.Route.StartOf(id)
+    local row = JournalQuestRow(Journal(), id)
+    if not row then return nil end
+    return row[7], row[8], row[9], row[6]
 end
 
 local function QuestLevelOf(journal, id, rootId, rootLevel)
@@ -226,6 +336,7 @@ local function ChainQuest(journal, id, level)
         where = where or row[6]
         map, x, y = row[7], row[8], row[9]
     end
+    local hadStart = (type(row) == "table" and row[7]) or (type(start) == "table" and start[1])
     local giver
     if type(start) == "table" then
         map = map or start[1]
@@ -247,9 +358,13 @@ local function ChainQuest(journal, id, level)
     end
     local turn = journal and journal.QuestTurnIns and journal.QuestTurnIns[id]
     if type(turn) == "table" then
-        if not map and turn[1] then map = turn[1] end
-        if not x and turn[2] then x = turn[2] end
-        if not y and turn[3] then y = turn[3] end
+        -- A turn-in pin is not a place to accept the quest. Inside drops keep
+        -- an empty start so the dungeon step can point at the entrance.
+        if hadStart then
+            if not map and turn[1] then map = turn[1] end
+            if not x and turn[2] then x = turn[2] end
+            if not y and turn[3] then y = turn[3] end
+        end
         if (not where or where == "") and type(turn[4]) == "string" and turn[4] ~= "" then
             where = turn[4]
         end
@@ -268,12 +383,14 @@ local function ChainQuest(journal, id, level)
         class = row and row.class,
         races = row and row.races,
         side = row and row[4],
+        inside = not hadStart and true or nil,
     }
 end
 
 local function UnitsFrom(def, seq, seen, side)
     local units = {}
     local journal = Journal()
+    local afterByDungeon = {}
     local segments = def.segments or {}
     local function allowed(id)
         local known = SG.BiS.Quest(id)
@@ -297,7 +414,7 @@ local function UnitsFrom(def, seq, seen, side)
     end
     for s = 1, #segments do
         local segment = segments[s]
-        local function push(level, gear, plain, entry, dungeon, keyOverride)
+        local function push(level, gear, plain, entry, dungeon, keyOverride, questLevel, leads)
             seq = seq + 1
             local key = keyOverride or segment.title
             if plain and plain.id then seen[plain.id] = true end
@@ -305,6 +422,7 @@ local function UnitsFrom(def, seq, seen, side)
             if type(entry) == "table" and entry.id then seen[entry.id] = true end
             units[#units + 1] = {
                 level = level or 1,
+                questLevel = questLevel or level or 1,
                 gear = gear or 99,
                 key = key,
                 zone = (type(entry) == "table" and entry.zone) or segment.zone or key,
@@ -312,8 +430,20 @@ local function UnitsFrom(def, seq, seen, side)
                 plain = plain,
                 entry = entry,
                 dungeon = dungeon,
+                leads = leads,
                 order = seq,
             }
+        end
+        local function rememberAfter(id, dungeonName, level)
+            local known = SG.BiS.Quest(id)
+            local quest = known or ChainQuest(journal, id, level)
+            if not quest then return end
+            local list = afterByDungeon[dungeonName]
+            if not list then
+                list = {}
+                afterByDungeon[dungeonName] = list
+            end
+            list[#list + 1] = quest
         end
         local function expandOne(id, rootId, rootLevel, dungeonName)
             if seen[id] then return end
@@ -321,11 +451,25 @@ local function UnitsFrom(def, seq, seen, side)
                 seen[id] = true
                 return
             end
-            local known = SG.BiS.Quest(id)
             local level = QuestLevelOf(journal, id, rootId, rootLevel)
+            local rowLevel = JournalRowLevel(journal, id)
+            local questLevel = rowLevel or level
+            local follow = FollowUpDungeon(journal, id)
+            if follow then
+                seen[id] = true
+                rememberAfter(id, follow, questLevel)
+                return
+            end
+            local known = SG.BiS.Quest(id)
             local dungeon = nil
             if id == rootId then dungeon = (known and known.dungeon) or dungeonName end
             if known and known.dungeon then dungeon = known.dungeon end
+            local rootKnown = rootId and SG.BiS.Quest(rootId)
+            local rootDungeon = dungeonName or (rootKnown and rootKnown.dungeon)
+            local leads = nil
+            if id ~= rootId and rootDungeon and rootDungeon ~= "" and not dungeon then
+                leads = rootDungeon
+            end
             local key = segment.title
             if id ~= rootId then
                 local probe = ChainQuest(journal, id, level)
@@ -333,17 +477,20 @@ local function UnitsFrom(def, seq, seen, side)
                 if dungeon and dungeon ~= "" then key = dungeon end
             end
             if known then
-                push(known.level or level, ClassGear(known), nil, id, dungeon, key)
+                push(known.level or level, ClassGear(known), nil, id, dungeon, key, questLevel, leads)
                 return
             end
-            local quest = ChainQuest(journal, id, level)
+            local quest = ChainQuest(journal, id, questLevel)
             if not quest then
                 seen[id] = true
                 return
             end
-            push(quest.level or level, 99, nil, quest, dungeon, key)
+            push(quest.level or level, 99, nil, quest, dungeon, key, questLevel, leads)
         end
         local function expand(rootId, dungeonName)
+            -- A hand-off is recorded when its parent chain is walked, in that
+            -- order. Walking it as its own root would file the parent as a lead-in.
+            if FollowUpDungeon(journal, rootId) then return end
             if seen[rootId] then return end
             if not allowed(rootId) then
                 seen[rootId] = true
@@ -372,13 +519,14 @@ local function UnitsFrom(def, seq, seen, side)
         for p = 1, #plain do
             local quest = plain[p]
             if quest and not (quest.id and seen[quest.id]) then
-                push(quest.level, 99, quest, nil, nil, segment.title)
+                push(quest.level, 99, quest, nil, nil, segment.title, quest.level, nil)
             end
         end
+        local segmentDungeon = DungeonName(journal, segment.title)
         local quests = segment.quests or {}
         for q = 1, #quests do
             local id = quests[q]
-            if type(id) == "number" then expand(id, nil) end
+            if type(id) == "number" then expand(id, segmentDungeon) end
         end
         if journal and journal.QuestData then
             local want = (segment.title or ""):lower()
@@ -393,6 +541,14 @@ local function UnitsFrom(def, seq, seen, side)
                     end
                 end
             end
+        end
+    end
+    local stamped = {}
+    for i = 1, #units do
+        local name = units[i].dungeon
+        if name and not stamped[name] then
+            stamped[name] = true
+            units[i].afterQuests = afterByDungeon[name]
         end
     end
     return units, seq
@@ -415,6 +571,19 @@ local function StarterSegments(def)
     return out
 end
 
+local function CopyQuest(entry, level)
+    local src = entry
+    if type(entry) == "number" then
+        src = SG.BiS.Quest(entry)
+        if not src then return nil end
+    end
+    if type(src) ~= "table" then return nil end
+    local copy = {}
+    for k, v in pairs(src) do copy[k] = v end
+    if level then copy.level = level end
+    return copy
+end
+
 local function Visit(batch, seen)
     local first = batch[1]
     local key = first.key
@@ -423,12 +592,28 @@ local function Visit(batch, seen)
         if batch[i].dungeon and batch[i].dungeon == key then dungeon = key end
     end
     local plain, quests = {}, {}
+    local after, seenAfter = {}, {}
     for i = 1, #batch do
         local unit = batch[i]
         if unit.plain then
             plain[#plain + 1] = unit.plain
         elseif unit.entry then
-            quests[#quests + 1] = unit.entry
+            local quest = CopyQuest(unit.entry, unit.level)
+            if quest then
+                if unit.leads and not unit.dungeon then quest.leadIn = true end
+                quests[#quests + 1] = quest
+            end
+        end
+        local list = unit.afterQuests
+        if type(list) == "table" then
+            for a = 1, #list do
+                local quest = list[a]
+                local id = type(quest) == "table" and quest.id or quest
+                if id and not seenAfter[id] then
+                    seenAfter[id] = true
+                    after[#after + 1] = quest
+                end
+            end
         end
     end
     local arrive = first.arrive
@@ -447,6 +632,8 @@ local function Visit(batch, seen)
         travel = key,
         zone = first.zone or key,
         dungeon = dungeon,
+        level = first.level,
+        after = after,
         arrive = {
             text = text,
             map = arrive and arrive.map,
@@ -513,6 +700,34 @@ local function ZephrasDetour(side)
     }
 end
 
+-- Dungeon steps use the journal bracket, raised only when a lead-in quest
+-- is actually harder than that bracket. A catalog level above the journal
+-- row is pulled down so it cannot push Ruins of Lordaeron past Wailing Caverns.
+local function ScheduleDungeons(pool)
+    local prereq = {}
+    for i = 1, #pool do
+        local unit = pool[i]
+        if unit.leads and not unit.dungeon then
+            local qlevel = unit.questLevel or unit.level
+            if qlevel and unit.level and qlevel < unit.level then
+                unit.level = qlevel
+            end
+            local name = unit.leads
+            local lv = unit.level or 1
+            if not prereq[name] or lv > prereq[name] then prereq[name] = lv end
+        end
+    end
+    for i = 1, #pool do
+        local unit = pool[i]
+        if unit.dungeon then
+            local floor = DungeonBand(unit.dungeon) or unit.level or 1
+            local pre = prereq[unit.dungeon]
+            if pre and pre > floor then floor = pre end
+            unit.level = floor
+        end
+    end
+end
+
 function SG.Route.Leveling(side)
     local race = SG.raceID
     local starterId = STARTER[side] and STARTER[side][race]
@@ -546,6 +761,7 @@ function SG.Route.Leveling(side)
     end
     local detour = ZephrasDetour(side)
     if detour then segments[#segments + 1] = detour end
+    ScheduleDungeons(pool)
     local unused = {}
     for i = 1, #pool do unused[i] = pool[i] end
     local seen = {}
@@ -567,6 +783,9 @@ function SG.Route.Leveling(side)
         end
         table.sort(batch, function(a, b)
             if a.level ~= b.level then return a.level < b.level end
+            local aq = a.questLevel or a.level or 0
+            local bq = b.questLevel or b.level or 0
+            if aq ~= bq then return aq < bq end
             return a.order < b.order
         end)
         segments[#segments + 1] = Visit(batch, seen)

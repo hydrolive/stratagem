@@ -1130,7 +1130,7 @@ function SG.UI.RefreshSteps(resetScroll)
             local prefix = row.done and "Done  " or ""
             row.title:SetText(prefix .. step.title)
             local bits = {}
-            if step.level and (step.questID or step.kind == "farm" or step.kind == "gear") then
+            if step.level and (step.questID or step.kind == "farm" or step.kind == "gear" or step.kind == "run") then
                 bits[#bits + 1] = "Lv " .. step.level
             end
             if step.optional then bits[#bits + 1] = "(Optional)" end
@@ -1213,6 +1213,7 @@ function SG.UI.RefreshDetail()
     local detail = SG.UI.detail
     local guide = SG.Engine.Get(SG.db.selected) or SG.Engine.Get(SG.state.tab)
     if SG.db.category == "options" then
+        detail.blurb:SetHeight(72)
         detail.eyebrow:SetText("OPTIONS")
         detail.title:SetText("Stratagem")
         detail.meta:SetText(SG.Specs.Label(SG.Specs.Selected()))
@@ -1231,6 +1232,7 @@ function SG.UI.RefreshDetail()
     end
     detail.star:Show()
     if not guide then
+        detail.blurb:SetHeight(72)
         detail.eyebrow:SetText("STRATAGEM")
         detail.title:SetText("Pick a guide")
         detail.meta:SetText("BiS before speed")
@@ -1285,7 +1287,15 @@ function SG.UI.RefreshDetail()
         else
             detail.meta:SetText(string.format("%s    %d-%d", SG.SideName(guide.side), guide.min or 1, guide.max or 60))
         end
-        detail.blurb:SetText(step.text or "")
+        local blurb = step.text or ""
+        if (step.kind == "complete" or step.kind == "run") and SG.QuestProgressText then
+            local extra = SG.QuestProgressText(step)
+            if extra and extra ~= "" then blurb = blurb .. "\n" .. extra end
+            detail.blurb:SetHeight(110)
+        else
+            detail.blurb:SetHeight(72)
+        end
+        detail.blurb:SetText(blurb)
         local dist = SG.Nav.FormatDistance(SG.Nav.Measure(step))
         local coord = SG.Nav.CoordText(step)
         detail.zone:SetText(dist and (coord .. "    " .. dist) or coord)
@@ -1321,6 +1331,7 @@ function SG.UI.RefreshDetail()
         detail.eyebrow:SetText(guide.group or "GUIDE")
         detail.title:SetText(guide.title)
         detail.meta:SetText(string.format("%d-%d    %s", guide.min or 1, guide.max or 60, SG.SideName(guide.side)))
+        detail.blurb:SetHeight(72)
         detail.blurb:SetText(guide.blurb or "")
         local zones = SG.Engine.ZoneLine(guide)
         detail.zone:SetText(string.format("%d steps  ·  %s", total, zones))
