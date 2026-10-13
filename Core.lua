@@ -259,6 +259,7 @@ function SG.OnLogin()
     end
     SG.Specs.Detect()
     SG.BiS.Refresh()
+    if SG.Gear and SG.Gear.Start then SG.Gear.Start() end
     SG.Engine.Rebuild()
     SG.RefreshQuestCache()
     if SG.db.options.autoAdvance then
@@ -277,7 +278,8 @@ function SG.OnLogin()
     end
     local events = {
         "QUEST_LOG_UPDATE", "QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED",
-        "GET_ITEM_INFO_RECEIVED", "PLAYER_LEVEL_UP", "ZONE_CHANGED_NEW_AREA",
+        "GET_ITEM_INFO_RECEIVED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
+        "ZONE_CHANGED_NEW_AREA",
     }
     for i = 1, #events do
         SG.eventFrame:RegisterEvent(events[i])
@@ -378,13 +380,19 @@ SG.eventFrame:RegisterEvent("PLAYER_LOGIN")
 SG.eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == SG.name then
         SG.InitDB()
+    elseif event == "ADDON_LOADED" and arg1 == "QuestieDB" then
+        if SG.classToken and SG.Gear and SG.Gear.Start then SG.Gear.Start() end
     elseif event == "PLAYER_LOGIN" then
         SG.OnLogin()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
         if SG.UI.OnItem then SG.UI.OnItem(arg1) end
+        if SG.Gear and SG.Gear.OnItem then SG.Gear.OnItem(arg1) end
     elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED" then
         if SG.Engine and SG.Engine.OnQuestUpdate then SG.Engine.OnQuestUpdate() end
-    elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_LEVEL_UP" then
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "PLAYER_LEVEL_UP" then
+        if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
+        if event == "PLAYER_LEVEL_UP" and SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
+    elseif event == "ZONE_CHANGED_NEW_AREA" then
         if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
     end
 end)

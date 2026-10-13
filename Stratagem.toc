@@ -1,11 +1,11 @@
 ## Interface: 16001, 120007, 120100, 11509, 20506, 38002, 40402, 50504
 ## Title: Stratagem
-## Notes: Level by the quests that reward best-in-slot gear for your spec.
+## Notes: Leveling routes that name every gear upgrade, and mark the best piece for your level.
 ## Author: Stratagem
 ## Version: 1.0.0
 ## SavedVariables: StratagemDB
 ## SavedVariablesPerCharacter: StratagemCharDB
-## OptionalDeps: NaowhForever, NaowhForever_BiS, NaowhForever_DungeonJournal, NaowwahForever, NaowwahForever_BiS, TomTom
+## OptionalDeps: NaowhForever, NaowhForever_BiS, NaowhForever_DungeonJournal, NaowwahForever, NaowwahForever_BiS, QuestieDB, TomTom
 ## IconTexture: Interface\AddOns\Stratagem\Media\Icon.tga
 ## X-Category: Questing
 
@@ -14,6 +14,7 @@ Specs.lua
 Data\Quests.lua
 Data\ItemSpecs.lua
 BiS.lua
+Gear.lua
 Guides.lua
 Engine.lua
 Nav.lua

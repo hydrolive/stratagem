@@ -561,7 +561,7 @@ function SG.UI.BuildOptions(parent)
     checks[#checks + 1] = addCheck("Match my talent tab", function() return SG.char.autoDetect end, function(on)
         SG.Specs.SetAuto(on)
     end)
-    checks[#checks + 1] = addCheck("Only quests that are BiS for my spec", function() return SG.db.options.onlyMySpec end, function(on)
+    checks[#checks + 1] = addCheck("Hide rewards meant for other specs", function() return SG.db.options.onlyMySpec end, function(on)
         SG.db.options.onlyMySpec = on
         SG.Engine.Rebuild()
         if SG.db.options.autoAdvance then SG.Engine.SyncAll() end
@@ -870,11 +870,11 @@ function SG.UI.PaintStep(row)
         SG.Paint(row.bg, on and T.rowOn or T.row)
         row.title:SetTextColor(SG.RGB(T.text))
     end
-    if row.bisFrom == "added" then
-        SG.Paint(row.bar, T.accent)
-        row.bar:Show()
-    elseif row.bisFrom == "guide" then
+    if row.bisFrom == "level" then
         SG.Paint(row.bar, T.gold)
+        row.bar:Show()
+    elseif row.bisFrom == "upgrade" then
+        SG.Paint(row.bar, T.good)
         row.bar:Show()
     elseif on then
         SG.Paint(row.bar, T.accent)
@@ -1092,15 +1092,15 @@ function SG.UI.RefreshSteps(resetScroll)
             row.title:SetText(prefix .. step.title)
             local bits = {}
             if step.level and step.questID then bits[#bits + 1] = "Lv " .. step.level end
-            if step.bisFrom == "added" then
-                bits[#bits + 1] = "Added BiS"
-            elseif step.bisFrom == "guide" then
-                bits[#bits + 1] = "Route BiS"
+            if step.bisFrom == "level" then
+                bits[#bits + 1] = "Level BiS"
+            elseif step.bisFrom == "upgrade" then
+                bits[#bits + 1] = "Upgrade"
             elseif step.match == "path" and not step.optional then
                 bits[#bits + 1] = "Starting zone"
             end
-            if step.rank and step.slotName then
-                bits[#bits + 1] = string.format("%s rank %d", step.slotName, step.rank)
+            if step.gearName then
+                bits[#bits + 1] = step.gearName
             elseif step.optional and step.bisFrom == nil then
                 bits[#bits + 1] = "Optional"
             end
@@ -1109,10 +1109,10 @@ function SG.UI.RefreshSteps(resetScroll)
             end
             row.sub:SetText(table.concat(bits, "   "))
             row.bisFrom = step.bisFrom
-            if step.bisFrom == "added" then
-                row.sub:SetTextColor(SG.RGB(T.accentHot))
-            elseif step.bisFrom == "guide" then
+            if step.bisFrom == "level" then
                 row.sub:SetTextColor(SG.RGB(T.gold))
+            elseif step.bisFrom == "upgrade" then
+                row.sub:SetTextColor(SG.RGB(T.good))
             else
                 row.sub:SetTextColor(SG.RGB(T.muted))
             end
@@ -1140,10 +1140,13 @@ local function ShowRewards(detail, step)
             end
             local r, g, b = SG.ItemColor(quality)
             local tag = ""
-            if step.itemID == itemID and step.rank then
-                tag = string.format("   BiS %s rank %d", step.slotName or "", step.rank)
-            elseif step.choice then
-                tag = "   choice"
+            local mode = step.pickSet and step.pickSet[itemID]
+            if mode == "bis" then
+                tag = "   Take · Level BiS"
+            elseif mode == "upgrade" then
+                tag = "   Take · Upgrade"
+            elseif step.skipSet and step.skipSet[itemID] then
+                tag = "   Skip"
             end
             row.text:SetText((name or ("Item " .. itemID)) .. tag)
             row.text:SetTextColor(r, g, b, 1)
@@ -1161,7 +1164,7 @@ function SG.UI.RefreshDetail()
         detail.eyebrow:SetText("OPTIONS")
         detail.title:SetText("Stratagem")
         detail.meta:SetText(SG.Specs.Label(SG.Specs.Selected()))
-        detail.blurb:SetText("Routes follow the quests that reward best-in-slot gear for your spec. Settings save as you change them.")
+        detail.blurb:SetText("Routes call out every gear upgrade. Gold means it is the best piece for that slot at your level.")
         detail.zone:SetText("")
         detail.hidden:SetText(SG.BiS.Status())
         detail.bar:SetPercent(0)
@@ -1215,10 +1218,10 @@ function SG.UI.RefreshDetail()
 
     if stepMode and step then
         detail.primary:Enable()
-        if step.bisFrom == "added" then
-            detail.eyebrow:SetText("ADDED FOR YOUR SPEC")
-        elseif step.bisFrom == "guide" then
-            detail.eyebrow:SetText("ON THE ROUTE  ·  BIS")
+        if step.bisFrom == "level" then
+            detail.eyebrow:SetText("LEVEL BIS")
+        elseif step.bisFrom == "upgrade" then
+            detail.eyebrow:SetText("UPGRADE")
         else
             detail.eyebrow:SetText(guide.title)
         end

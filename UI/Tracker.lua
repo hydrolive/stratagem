@@ -165,18 +165,21 @@ function SG.Tracker.Update()
         frame.coord:SetText(guide.place or "")
     else
         local tag = ""
-        if step.bisFrom == "added" then
-            tag = "Added BiS   "
-            frame.step:SetTextColor(SG.RGB(SG.Theme.accentHot))
-        elseif step.bisFrom == "guide" then
-            tag = "Route BiS   "
+        if step.bisFrom == "level" then
+            tag = "Level BiS   "
             frame.step:SetTextColor(SG.RGB(SG.Theme.gold))
+        elseif step.bisFrom == "upgrade" then
+            tag = "Upgrade   "
+            frame.step:SetTextColor(SG.RGB(SG.Theme.good))
         else
             frame.step:SetTextColor(SG.RGB(SG.Theme.text))
         end
         frame.step:SetText(tag .. step.title)
         local dist = SG.Nav.FormatDistance(SG.Nav.Measure(step))
         local coord = SG.Nav.CoordText(step)
+        if step.gearName and step.gearName ~= "" then
+            coord = step.gearName .. (coord ~= "" and ("    " .. coord) or "")
+        end
         frame.coord:SetText(dist and (coord .. "    " .. dist) or coord)
     end
 end

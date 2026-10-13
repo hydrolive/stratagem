@@ -54,16 +54,7 @@ end
 local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
     local match = SG.BiS.Match(quest, guide.side)
     local giver = SG.Engine.Giver(quest.where)
-    local spec = SG.Specs.Selected()
-    local itemID, rank, slot = SG.BiS.BestReward(quest, spec)
-    local slotName = slot and SG.SLOT_NAME[slot] or nil
     local from = giver and (" from " .. giver) or ""
-    local reward = ""
-    if rank and slotName then
-        reward = string.format(" Rank %d %s for your spec.", rank, slotName)
-    elseif quest.choice then
-        reward = " Choose the reward that is best for your spec."
-    end
     local place = quest.zone or segment.zone or segment.title
     if gaps and prevLevel and quest.level and (quest.level - prevLevel) >= 4 then
         steps[#steps + 1] = Step({
@@ -75,7 +66,7 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
             level = quest.level,
             title = "Level toward " .. quest.level,
             text = string.format(
-                "Optional. The next BiS quest is level %d. Quest in %s until you are close, then pick it up. No grind is required if you are already there.",
+                "Optional. The next quest is level %d. Keep questing in %s until you are close, then pick it up. No grind is required if you are already there.",
                 quest.level, place
             ),
             map = quest.map, x = quest.x, y = quest.y,
@@ -93,10 +84,6 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         choice = quest.choice,
         level = quest.level,
         match = match,
-        rank = rank,
-        slot = slot,
-        slotName = slotName,
-        itemID = itemID,
     }
     local function add(kind, title, text)
         -- Copy. The three steps must not share one table.
@@ -105,8 +92,7 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
             map = shared.map, x = shared.x, y = shared.y,
             zone = shared.zone, segment = shared.segment,
             rewards = shared.rewards, choice = shared.choice, level = shared.level,
-            match = shared.match, rank = shared.rank, slot = shared.slot,
-            slotName = shared.slotName, itemID = shared.itemID,
+            match = shared.match,
         })
         row.kind = kind
         row.title = title
@@ -114,13 +100,12 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         steps[#steps + 1] = row
     end
     add("accept", "Accept: " .. quest.name,
-        string.format("Accept %s%s.%s", quest.name, from, reward))
+        string.format("Accept %s%s.", quest.name, from))
     add("complete", "Complete: " .. quest.name,
         string.format("Finish the objectives for %s.", quest.name))
     local turn = giver and (" to " .. giver) or ""
-    local choice = quest.choice and " If several pieces are offered, take the one ranked for your spec." or ""
     add("turnin", "Turn in: " .. quest.name,
-        string.format("Turn in %s%s.%s", quest.name, turn, choice))
+        string.format("Turn in %s%s.", quest.name, turn))
 end
 
 -- Starting-zone quests are not in the BiS catalog. They stay on the route so
@@ -181,7 +166,7 @@ local function AddPlain(steps, guide, segment, quest, prevLevel, gaps)
         steps[#steps + 1] = row
     end
     add("accept", "Accept: " .. quest.name,
-        string.format("Accept %s%s. This is a starting-zone quest. Its reward is not best in slot.", quest.name, from))
+        string.format("Accept %s%s. This is a starting-zone quest.", quest.name, from))
     add("complete", "Complete: " .. quest.name,
         string.format("Finish the objectives for %s.", quest.name))
     local turn = giver and (" to " .. giver) or ""
@@ -275,42 +260,6 @@ local function InjectUpgrades(steps, def)
     return added
 end
 
-local function ReplacePlain(text, old, new)
-    if not text then return text end
-    local a, b = text:find(old, 1, true)
-    if not a then return text end
-    return text:sub(1, a - 1) .. new .. text:sub(b + 1)
-end
-
-local function TagUpgrades(steps, added)
-    local spec = SG.Specs.Selected()
-    for i = 1, #steps do
-        local step = steps[i]
-        local quest = step.questID and SG.BiS.Quest(step.questID)
-        if quest and step.match ~= "hide" then
-            local itemID, rank, slot = SG.BiS.BestReward(quest, spec)
-            if rank then
-                step.bisFrom = added[step.questID] and "added" or "guide"
-                step.rank = rank
-                step.slot = slot
-                step.slotName = slot and SG.SLOT_NAME[slot] or nil
-                step.itemID = itemID
-                step.rewards = quest.rewards
-                step.choice = quest.choice
-                if step.kind == "accept" and step.bisFrom == "added" then
-                    step.text = "Added for your spec. " .. (step.text or "")
-                elseif step.kind == "accept" then
-                    step.text = ReplacePlain(
-                        step.text,
-                        " Its reward is not best in slot.",
-                        " Its reward is best in slot for your spec."
-                    )
-                end
-            end
-        end
-    end
-end
-
 local function ApplyVisibility(steps)
     local only = SG.db and SG.db.options and SG.db.options.onlyMySpec
     local hiddenQuests = 0
@@ -395,8 +344,7 @@ function SG.Engine.Compile(def)
             end
         end
     end
-    local added = InjectUpgrades(steps, def)
-    TagUpgrades(steps, added)
+    InjectUpgrades(steps, def)
     for i = 1, #steps do
         steps[i].index = i
         steps[i].guide = def.id
@@ -409,7 +357,7 @@ function SG.Engine.Compile(def)
             visibleQuests = visibleQuests + 1
         end
     end
-    return {
+    local guide = {
         id = def.id,
         title = def.title,
         group = def.group,
@@ -425,6 +373,8 @@ function SG.Engine.Compile(def)
         visibleQuests = visibleQuests,
         empty = visibleQuests == 0,
     }
+    if SG.Gear and SG.Gear.Apply then SG.Gear.Apply(guide) end
+    return guide
 end
 
 local function BucketQuests(def)

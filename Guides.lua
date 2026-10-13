@@ -69,7 +69,7 @@ SG.GuideData = {
         group = "Horde 1-30",
         side = "H", min = 1, max = 12,
         place = "Mulgore",
-        blurb = "The tauren start. These camp quests are the way out of Red Cloud Mesa. None of them are best in slot. The catalog's only Mulgore BiS quest is The Broodmother at 31.",
+        blurb = "The tauren start. Camp and Bloodhoof quests are how you leave Red Cloud Mesa. Each reward that is better than what you have on is named. Gold means it is the best piece for that slot at your level. The Broodmother stays on the 30-40 guide.",
         segments = {
             Segment("Camp Narache", "Mulgore", 1412, 44.0, 77.0,
                 "Start at Camp Narache. Mulgore's map was redrawn, so the pin can sit off the tents. Work the camp, then take Rites of the Earthmother to Bloodhoof.",
@@ -123,7 +123,7 @@ SG.GuideData = {
         group = "Horde 1-30",
         side = "H", min = 1, max = 14,
         place = "Durotar",
-        blurb = "The orc and troll start. The valley and Razor Hill quests are how you leave the zone. The only best-in-slot stop here is the shaman Call of Fire.",
+        blurb = "The orc and troll start. Valley, Sen'jin, and Razor Hill quests are how you leave the zone. Every reward that replaces an empty or weaker slot is named, and gold means it is the best piece for that slot at your level. Shamans also take Call of Fire.",
         segments = {
             Segment("Valley of Trials", "Durotar", 1411, 42.6, 68.0,
                 "Start in the Den in the Valley of Trials. Take your class note, then the valley quests. Report to Sen'jin when the medallion is done.",
@@ -188,7 +188,7 @@ SG.GuideData = {
                     Path(840, "Conscript of the Horde", 12, nil, ORC_TROLL),
                 }),
             Segment("Call of Fire", "Durotar", 1411, 38.9, 58.2,
-                "Shamans only. Orcs and trolls start with 2983 at Razor Hill. Tauren start with 2984 in Bloodhoof. Both meet here for 1525 and 1526. Quest 1527, at the brazier, is the one best-in-slot reward in Durotar.",
+                "Shamans only. Orcs and trolls start with 2983 at Razor Hill. Tauren start with 2984 in Bloodhoof. Both meet here for 1525 and 1526. Quest 1527, at the brazier, is the shaman class reward.",
                 { 1527 },
                 {
                     Path(2983, "Call of Fire", 10, "SHAMAN", ORC_TROLL),

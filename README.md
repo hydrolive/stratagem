@@ -1,6 +1,6 @@
 # Stratagem
 
-A free leveling-guide addon for the WoW Forever client (`World of Warcraft\_classic_beta_`, interface 16001). The route is the zone quest list, in order. When a quest rewards a best-in-slot piece for your spec and the route did not already include it, that chain is added. It is not a speedrun.
+A free leveling-guide addon for the WoW Forever client (`World of Warcraft\_classic_beta_`, interface 16001). The route is the zone quest list, in order. Along the way it names every reward worth equipping, and it marks gold only when that item is the best piece for the slot at your current level. The aim is a character who is geared for the next dungeon, not only a character who leveled quickly.
 
 The window is a dark navy browser: categories on the left, guides in the middle, the selected route on the right. Several guides can be open in tabs.
 
@@ -10,6 +10,7 @@ The window is a dark navy browser: categories on the left, guides in the middle,
 2. Enable **Stratagem** at the character screen. The addon list icon is the compass medallion.
 3. Optional, and recommended when you have them:
    - **NaowhForever**, **NaowhForever_BiS**, and **NaowhForever_DungeonJournal** (a `NaowwahForever_BiS` folder is recognized too). While those are enabled, Stratagem reads their live quest list and spec rankings.
+   - **QuestieDB**. Starting-zone quests are not in the bundled catalog, so their reward names (such as the leather waist on The Hunt Begins) come from QuestieDB. Without it, those steps still show, and they cannot name the item. Catalog quests still can.
    - **TomTom**, for a minimap and world arrow. Without it, Stratagem shows coordinates and its own on-screen arrow.
 
 `/reload` after enabling. Open the window with `/sg` or the minimap button.
@@ -33,11 +34,11 @@ Each quest on a route is three steps: accept, complete, turn in. Travel and "lev
 
 Continue, Open, or Open in tab checks quests this character has already finished. Turned-in quests are skipped. A quest already in your log skips Accept, and skips Complete once the objectives are done. Turn in stays until you hand it in. Travel before the first quest you have not finished is skipped after that. A quest you never accepted stays on the route, even if you are past its level. Chat says how many steps were skipped. Prev still stays put until you select that guide again.
 
-**Only quests that are BiS for my spec** hides rewards that are ranked for a different spec. A quest still shows when the catalog lists it as BiS but the top-10 ranking slice does not name your spec. Quests for another class, race, or faction are always hidden. A guide with nothing left for you disappears from the list.
+**Hide rewards meant for other specs** hides quests the endgame list ranked for a different spec. A quest still shows when that list does not name a spec at all. Quests for another class, race, or faction are always hidden. A guide with nothing left for you disappears from the list. Changing spec hides and shows those steps. It does not rebuild the step order. Equipping gear does not either.
 
-A chain that upgrades your spec is marked on every step. **Route BiS** (gold bar) means the quest was already in the guide. **Added BiS** (violet bar) means it was inserted because the written route did not have it. The tracker and the detail panel use the same labels. Changing spec moves the badges. It does not rebuild the step order.
+On a quest, every reward that is better than what you have on is named. An empty slot counts. A choice tells you which one to take and what to skip. **Level BiS** (gold) means that item is the best piece for the slot you can wear at your level. **Upgrade** (green) means it is still an improvement, and a stronger piece for that slot is already available. Mail is not a hunter or shaman upgrade before level 40. Plate is not a warrior or paladin upgrade before level 40. The endgame rank list is not printed on the step.
 
-Camp Narache and the Valley of Trials are the exception. Those steps are how a new character leaves the start zone. Each one is marked Starting zone, and the accept text says the reward is not best in slot. The spec filter does not remove them. Mulgore's map was redrawn, so those pins can sit off the camp. Durotar's map was not. The only best-in-slot quest in early Durotar is the shaman Call of Fire. Mulgore's only catalogued BiS quest, The Broodmother, stays on the 30–40 guide.
+Camp Narache and the Valley of Trials are how a new character leaves the start zone. The spec filter does not remove them. With QuestieDB enabled, a tauren hunter on The Hunt Begins is told to choose the leather waist while that slot is empty, and to skip the mail hands. Once a better waist is equipped, or one is available from a quest you can do by your current level, the gold mark drops. Mulgore's map was redrawn, so those pins can sit off the camp. Durotar's map was not. Shaman Call of Fire stays on the Durotar guide. The Broodmother stays on the 30–40 guide.
 
 Right-click a guide in the list to favorite it. Right-click the tracker, or the HUD arrow, to open the guide list. Double-click, **Continue**, or **Open in new tab** opens a tab (four at a time; the oldest closes). **Open in tab** replaces the guide tab you already have open. **Continue** also sets the waypoint.
 
@@ -76,7 +77,7 @@ A keybind, **Toggle Stratagem**, is under the Stratagem header in the game's key
 
 Leveling guides are zone segments for Horde and Alliance, grouped as 1–30 and 30–40. Professions, reputation, dungeons, exploration, class quests, and choice-reward lists are separate categories. Dungeon, zone, class, and choice guides are built from the catalog when you log in, so they follow whatever Naowh Forever has loaded.
 
-The bundled snapshot has **131** BiS quests, about **level 6 through 34**. That is the whole journal extract this copy was built from. The 30–40 brackets only contain the quests that exist in that range, and there is no BiS route past the mid 30s until the catalog grows. Journal quest ids were not invented.
+The bundled snapshot has **131** catalog quests, about **level 6 through 34**. That is the whole journal extract this copy was built from. The 30–40 brackets only contain the quests that exist in that range, and there is no catalog route past the mid 30s until that list grows. Journal quest ids were not invented. Level BiS on the starting-zone quests still works in that range, because those reward names come from QuestieDB rather than from the snapshot.
 
 The Mulgore and Durotar starter routes use quest ids the Forever Codex lists for those hubs. They are not in the BiS snapshot, and they are not claimed as best in slot.
 
