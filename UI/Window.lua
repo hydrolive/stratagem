@@ -1061,6 +1061,8 @@ function SG.UI.RefreshSteps(resetScroll)
             if step.level and step.questID then bits[#bits + 1] = "Lv " .. step.level end
             if step.rank and step.slotName then
                 bits[#bits + 1] = string.format("BiS %s rank %d", step.slotName, step.rank)
+            elseif step.match == "path" and not step.optional then
+                bits[#bits + 1] = "Starting zone"
             elseif step.optional then
                 bits[#bits + 1] = "Optional"
             end

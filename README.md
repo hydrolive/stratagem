@@ -20,7 +20,7 @@ Log into the `_classic_beta_` client with Stratagem enabled.
 
 1. `/reload`. Until you start a route, the window opens on its own. Each guide has an Open button, and the first one is already selected so Continue is on the right. The tracker button is Choose a guide. Esc, the minimap button, and `/sg hide` close the window.
 2. The sidebar spec should match your class. Open it and pick a spec, reload, and confirm the choice stuck. `/sg spec` prints the key.
-3. Set faction to your side. Horde 1–30 and Alliance 1–30 should list zone guides. A guide for another class's only quest (Durotar's Call of Fire, for a non-shaman) stays hidden.
+3. Set faction to your side. Horde 1–30 and Alliance 1–30 should list zone guides. Tauren get Camp Narache & Mulgore. Orcs and trolls get Valley of Trials & Durotar. A guide for another race stays hidden. Shamans also get Call of Fire on the Durotar guide.
 4. Select The Barrens or an Alliance zone, press Continue, and confirm the step list, progress bar, and reward rows. Accept the quest in game and confirm the accept step marks itself done.
 5. With TomTom enabled, Continue should drop a pin. Disable TomTom, or turn its option off, and the on-screen arrow should show coordinates. `/sg arrowflip` reverses it.
 6. `/sg status` should say whether the live Naowh journal loaded or the bundled snapshot (131 quests, about level 6–34) is in use.
@@ -32,6 +32,8 @@ Pick your spec at the bottom of the sidebar, or leave **Match my talent tab** on
 Each quest on a route is three steps: accept, complete, turn in. Travel and "level toward" notes are optional and do not count toward the bar. Progress is saved per character. The quest log can mark steps done on its own (Options, on by default).
 
 **Only quests that are BiS for my spec** hides rewards that are ranked for a different spec. A quest still shows when the catalog lists it as BiS but the top-10 ranking slice does not name your spec. Quests for another class, race, or faction are always hidden. A guide with nothing left for you disappears from the list.
+
+Camp Narache and the Valley of Trials are the exception. Those steps are how a new character leaves the start zone. Each one is marked Starting zone, and the accept text says the reward is not best in slot. The spec filter does not remove them. Mulgore's map was redrawn, so those pins can sit off the camp. Durotar's map was not. The only best-in-slot quest in early Durotar is the shaman Call of Fire. Mulgore's only catalogued BiS quest, The Broodmother, stays on the 30–40 guide.
 
 Right-click a guide to favorite it. Double-click, **Continue**, or **Open in new tab** opens a tab (four at a time; the oldest closes). **Open in tab** replaces the guide tab you already have open. **Continue** also sets the waypoint.
 
@@ -66,7 +68,9 @@ A keybind, **Toggle Stratagem**, is under the Stratagem header in the game's key
 
 Leveling guides are zone segments for Horde and Alliance, grouped as 1–30 and 30–40. Professions, reputation, dungeons, exploration, class quests, and choice-reward lists are separate categories. Dungeon, zone, class, and choice guides are built from the catalog when you log in, so they follow whatever Naowh Forever has loaded.
 
-The bundled snapshot has **131** BiS quests, about **level 6 through 34**. That is the whole journal extract this copy was built from. The 30–40 brackets only contain the quests that exist in that range, and there is no route past the mid 30s until the catalog grows. Quest ids are taken from the journal. None were invented.
+The bundled snapshot has **131** BiS quests, about **level 6 through 34**. That is the whole journal extract this copy was built from. The 30–40 brackets only contain the quests that exist in that range, and there is no BiS route past the mid 30s until the catalog grows. Journal quest ids were not invented.
+
+The Mulgore and Durotar starter routes use quest ids the Forever Codex lists for those hubs. They are not in the BiS snapshot, and they are not claimed as best in slot.
 
 ## Updating the BiS snapshot
 

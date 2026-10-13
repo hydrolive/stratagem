@@ -123,6 +123,72 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         string.format("Turn in %s%s.%s", quest.name, turn, choice))
 end
 
+-- Starting-zone quests are not in the BiS catalog. They stay on the route so
+-- a new character can leave the camp, and the text does not call them BiS.
+local function AddPlain(steps, guide, segment, quest, prevLevel, gaps)
+    local match = "path"
+    if quest.class and SG.classToken and quest.class ~= SG.classToken then
+        match = "hide"
+    end
+    if quest.notClass and SG.classToken and quest.notClass == SG.classToken then
+        match = "hide"
+    end
+    if quest.races and not SG.BiS.RaceOK(quest, SG.raceID) then
+        match = "hide"
+    end
+    local arrive = segment.arrive or {}
+    local map = quest.map or arrive.map
+    local x = quest.x or arrive.x
+    local y = quest.y or arrive.y
+    local place = quest.zone or segment.zone or segment.title
+    if gaps and match ~= "hide" and prevLevel and quest.level and (quest.level - prevLevel) >= 4 then
+        steps[#steps + 1] = Step({
+            kind = "note",
+            optional = true,
+            match = match,
+            segment = segment.title,
+            zone = place,
+            level = quest.level,
+            title = "Level toward " .. quest.level,
+            text = string.format(
+                "Optional. The next starting quest is level %d. Keep questing in %s until you are close.",
+                quest.level, place
+            ),
+            map = map, x = x, y = y,
+        })
+    end
+    local giver = SG.Engine.Giver(quest.where)
+    local from = giver and (" from " .. giver) or ""
+    local shared = {
+        questID = quest.id,
+        questName = quest.name,
+        map = map, x = x, y = y,
+        zone = place,
+        segment = segment.title,
+        level = quest.level,
+        match = match,
+    }
+    local function add(kind, title, text)
+        local row = Step({
+            questID = shared.questID, questName = shared.questName,
+            map = shared.map, x = shared.x, y = shared.y,
+            zone = shared.zone, segment = shared.segment,
+            level = shared.level, match = shared.match,
+        })
+        row.kind = kind
+        row.title = title
+        row.text = text
+        steps[#steps + 1] = row
+    end
+    add("accept", "Accept: " .. quest.name,
+        string.format("Accept %s%s. This is a starting-zone quest. Its reward is not best in slot.", quest.name, from))
+    add("complete", "Complete: " .. quest.name,
+        string.format("Finish the objectives for %s.", quest.name))
+    local turn = giver and (" to " .. giver) or ""
+    add("turnin", "Turn in: " .. quest.name,
+        string.format("Turn in %s%s.", quest.name, turn))
+end
+
 local function ApplyVisibility(steps)
     local only = SG.db and SG.db.options and SG.db.options.onlyMySpec
     local hiddenQuests = 0
@@ -193,6 +259,11 @@ function SG.Engine.Compile(def)
             })
         end
         local prev = nil
+        local plain = segment.plain or {}
+        for q = 1, #plain do
+            AddPlain(steps, def, segment, plain[q], prev, gaps)
+            prev = plain[q].level or prev
+        end
         local quests = segment.quests or {}
         for q = 1, #quests do
             local quest = SG.BiS.Quest(quests[q])
