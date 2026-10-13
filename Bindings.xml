@@ -1,0 +1,5 @@
+<Bindings>
+	<Binding name="STRATAGEM_TOGGLE" header="STRATAGEM">
+		Stratagem.UI.Toggle()
+	</Binding>
+</Bindings>
