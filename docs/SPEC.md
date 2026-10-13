@@ -41,8 +41,12 @@ On the Forever character screen, enable Stratagem. In game:
 6. With TomTom on, Continue drops a pin for a step that has a map id. With TomTom off, the arrow shows coordinates. `/sg arrowflip` reverses it.
 7. `/sg status` names the live journal or the bundled snapshot.
 
+## Repository
+
+Each completed prompt is one commit, then a push to `origin` `main` on `https://github.com/hydrolive/stratagem.git`. No force-push. The Forever AddOns copy is a separate step and is not the git push.
+
 ## Last change
 
-Guide rows were not reliable buttons: the list could lay out at zero width, and the tracker only said to open a guide. Each row now has an Open button, the first guide is selected so Continue shows on the right, and the tracker has Choose a guide.
+No client files changed. The agent now pushes `main` to origin after every commit. No `/reload` for this change.
 
-Test: `/reload`. The window opens. Horde or Alliance 1–30 lists guides with an Open button on each row. Open or Continue starts that route. The tracker then shows Prev, Point, Done, and Next.
+The previous client fix still stands: `/reload`, then Open or Continue on a guide in the list.

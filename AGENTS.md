@@ -9,9 +9,10 @@ When a prompt changes the addon, its data, or these instructions, finish in this
 1. Update `docs/SPEC.md` so it matches the code. Include what changed and the in-game steps that prove it.
 2. Update `README.md` when install, commands, or player-facing behavior changed.
 3. Update the workspace memory topic `topics/stratagem.md` under the Stratagem workspace scope. Do not edit `MEMORY.md`. Record stable facts only: client path, deploy path, data source, and catalog limits.
-4. Commit the repository. One commit for the completed prompt. Do not push a git remote unless the user asks.
-5. Copy the addon to `D:\WoW\World of Warcraft\_classic_beta_\Interface\AddOns\Stratagem`. Exclude `.git`.
-6. Tell the user what changed and how to test it on WoW Forever.
+4. Commit the repository. One commit for the completed prompt.
+5. Push that commit to `origin` `main` (`https://github.com/hydrolive/stratagem.git`). Do not force-push.
+6. Copy the addon to `D:\WoW\World of Warcraft\_classic_beta_\Interface\AddOns\Stratagem`. Exclude `.git`.
+7. Tell the user what changed and how to test it on WoW Forever.
 
 Skip the copy only when the prompt did not change anything the client loads or the docs that describe it. Still update the spec and memory if the contract changed.
 
