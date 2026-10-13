@@ -1203,6 +1203,9 @@ function SG.UI.RefreshSteps(resetScroll)
             if step.dropLine then
                 bits[#bits + 1] = step.dropLine
             end
+            if step.placeName and step.placeName ~= "" then
+                bits[#bits + 1] = step.placeName
+            end
             if step.x and step.y then
                 bits[#bits + 1] = string.format("%.1f, %.1f", step.x, step.y)
             end
@@ -1287,8 +1290,22 @@ local function LayoutDetail(detail, step)
     local textH = blurb:GetStringHeight() or 0
     if textH < 1 then
         local text = blurb:GetText() or ""
-        local lines = 1
-        for _ in text:gmatch("\n") do lines = lines + 1 end
+        local per = math.floor(width / 6.5)
+        if per < 24 then per = 24 end
+        local lines, count = 1, 0
+        for i = 1, #text do
+            local ch = text:sub(i, i)
+            if ch == "\n" then
+                lines = lines + 1
+                count = 0
+            else
+                count = count + 1
+                if count >= per then
+                    lines = lines + 1
+                    count = 0
+                end
+            end
+        end
         textH = lines * 16
     end
     blurb:SetHeight(textH + 4)
@@ -1299,11 +1316,41 @@ local function LayoutDetail(detail, step)
     end
     local frameH = detail:GetHeight()
     if not frameH or frameH < 400 then frameH = 640 end
-    local maxView = frameH - 106 - 12 - 330
-    if maxView < 72 then maxView = 72 end
-    local view = textH + 8
+    -- Buttons and the reward rows that are actually showing sit at the bottom.
+    -- The objective text gets everything above them, so a dungeon clear is not
+    -- stuck in a short box with empty room reserved for four reward rows.
+    local function shown(widget)
+        return widget and widget.IsShown and widget:IsShown()
+    end
+    local function blank(widget)
+        if not widget or not widget.GetText then return true end
+        local text = widget:GetText()
+        return text == nil or text == ""
+    end
+    local stack = {}
+    local function push(widget, h, both, skipBlank)
+        if not shown(widget) then return end
+        if skipBlank and blank(widget) then return end
+        stack[#stack + 1] = { widget, h, both }
+    end
+    push(detail.zone, 18, true, true)
+    push(detail.hidden, 16, true, true)
+    push(detail.bar, 16, true, false)
+    push(detail.percent, 16, false, true)
+    push(detail.primary, 40, true, false)
+    push(detail.secondary, 34, true, false)
+    push(detail.tertiary, 34, true, false)
+    push(detail.reset, 22, false, false)
+    local items = detail.items or {}
+    local rewardCount = 0
+    for i = 1, #items do
+        if shown(items[i]) then rewardCount = rewardCount + 1 end
+    end
+    local stackH = 12
+    for i = 1, #stack do stackH = stackH + stack[i][2] end
+    stackH = stackH + rewardCount * 26
+    local view = frameH - 106 - 8 - stackH
     if view < 72 then view = 72 end
-    if view > maxView then view = maxView end
     local same = detail.blurbStep == step
     detail.blurbStep = step
     local kept = same and scroll:GetVerticalScroll() or 0
@@ -1314,26 +1361,22 @@ local function LayoutDetail(detail, step)
     if kept > maxScroll then kept = maxScroll end
     scroll:SetVerticalScroll(kept)
     local top = -(106 + view + 4)
-    local function move(widget, dy, both)
-        if not widget then return end
+    local y = 0
+    for i = 1, #stack do
+        local widget, h, both = stack[i][1], stack[i][2], stack[i][3]
         widget:ClearAllPoints()
-        widget:SetPoint("TOPLEFT", 16, top - dy)
-        if both then widget:SetPoint("TOPRIGHT", -16, top - dy) end
+        widget:SetPoint("TOPLEFT", 16, top - y)
+        if both then widget:SetPoint("TOPRIGHT", -16, top - y) end
+        y = y + h
     end
-    move(detail.zone, 0, true)
-    move(detail.hidden, 18, true)
-    move(detail.bar, 40, true)
-    move(detail.percent, 52, false)
-    move(detail.primary, 76, true)
-    move(detail.secondary, 116, true)
-    move(detail.tertiary, 150, true)
-    move(detail.reset, 186, false)
-    local items = detail.items or {}
     for i = 1, #items do
         local row = items[i]
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", 16, top - 214 - (i - 1) * 26)
-        row:SetPoint("RIGHT", -16, 0)
+        if shown(row) then
+            row:SetPoint("TOPLEFT", 16, top - y)
+            row:SetPoint("RIGHT", -16, 0)
+            y = y + 26
+        end
     end
     if detail.bar and detail.bar.SetPercent then
         detail.bar:SetPercent(detail.bar.percent, detail.bar.done)
@@ -1426,7 +1469,11 @@ function SG.UI.RefreshDetail()
         detail.blurb:SetText(blurb)
         local dist = SG.Nav.FormatDistance(SG.Nav.Measure(step))
         local coord = SG.Nav.CoordText(step)
+        if step.placeName and step.placeName ~= "" and step.x and step.y then
+            coord = string.format("%s   %.1f, %.1f", step.placeName, step.x, step.y)
+        end
         detail.zone:SetText(dist and (coord .. "    " .. dist) or coord)
+        detail.hidden:SetText("")
         detail.primary:SetLabel("Set waypoint")
         detail.primary:SetScript("OnClick", function()
             SG.Engine.Focus(guide, step.index, true)

@@ -245,6 +245,40 @@ function SG.Route.StartOf(id)
     return row[7], row[8], row[9], row[6]
 end
 
+-- A journal line such as "Silverpine Forest, Sepulcher - Hadrec" names the
+-- town. A nearby pin on the same map, such as Tabitha Heartweaver, keeps
+-- that town. A pin on another map does not, so the Undercity journal line
+-- for that quest cannot move the Sepulcher pickup.
+function SG.Route.TownNear(map, x, y)
+    if not map or not x or not y then return nil end
+    local journal = Journal()
+    local data = journal and journal.QuestData
+    if type(data) ~= "table" then return nil end
+    local best, bestDist
+    for d = 1, #data do
+        local quests = data[d].quests
+        if type(quests) == "table" then
+            for q = 1, #quests do
+                local row = quests[q]
+                if type(row) == "table" and row[7] == map and type(row[8]) == "number" and type(row[9]) == "number" then
+                    local where = row[6]
+                    local town = type(where) == "string" and where:match(",%s*(.-)%s+%-")
+                    if town and town ~= "" then
+                        local dx = row[8] - x
+                        local dy = row[9] - y
+                        local dist = dx * dx + dy * dy
+                        if dist <= 8 and (not bestDist or dist < bestDist) then
+                            best = town
+                            bestDist = dist
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
 -- Same class bits the client uses. Discovery stores a mask, not a token.
 local CLASS_BITS = {
     WARRIOR = 1, PALADIN = 2, HUNTER = 4, ROGUE = 8, PRIEST = 16,
@@ -1361,7 +1395,7 @@ local function SourceLine(itemID)
         end
         local line = "Quest: " .. name .. "."
         if where ~= "" then line = line .. " " .. where end
-        return line, map, x, y
+        return line, map, x, y, "quest"
     end
     local drop = DropOf(itemID)
     if drop or kind == "dungeon" then
@@ -1378,37 +1412,160 @@ local function SourceLine(itemID)
         local line = "Drops from " .. (boss or "a boss")
         if place then line = line .. " in " .. place end
         line = line .. " (" .. ChanceText(drop) .. ")."
-        return line, map, x, y
+        return line, map, x, y, "drop"
     end
     if type(src) == "string" and src ~= "" then
         local low = src:lower()
         if low:find("auction", 1, true) then
-            return "Buy it on the auction house. " .. src .. "."
+            return "Buy it on the auction house. " .. src .. ".", nil, nil, nil, "auction"
         end
         if low:find("world drop", 1, true) then
-            return "Source: World drop. The list does not say it is on the auction house."
+            return "Source: World drop. The list does not say it is on the auction house.", nil, nil, nil, "drop"
         end
         return "Source: " .. src .. "."
     end
     return "The loaded list does not name a source for this item."
 end
 
-local function EnchantLine(slot, slotName)
-    local ns = Namespace()
-    local enchants = ns and ns.BiS and ns.BiS.Enchants
-    if not (enchants and enchants.Advise and ns.BiSEnchants) then
-        return "(Optional) Enchant the " .. slotName .. " after you equip it. Enchant advice loads with NaowhForever_BiS. Mark this done to skip it."
+-- Naowh's Advise only reads eight worn slots, so an empty head or a rank-1
+-- piece you are not wearing never gets a name. Score the rank-1 item instead.
+local EQUIP_BIT = {
+    INVTYPE_HEAD = 1, INVTYPE_NECK = 2, INVTYPE_SHOULDER = 3, INVTYPE_BODY = 4,
+    INVTYPE_CHEST = 5, INVTYPE_WAIST = 6, INVTYPE_LEGS = 7, INVTYPE_FEET = 8,
+    INVTYPE_WRIST = 9, INVTYPE_HAND = 10, INVTYPE_FINGER = 11, INVTYPE_TRINKET = 12,
+    INVTYPE_WEAPON = 13, INVTYPE_SHIELD = 14, INVTYPE_RANGED = 15, INVTYPE_CLOAK = 16,
+    INVTYPE_2HWEAPON = 17, INVTYPE_TABARD = 19, INVTYPE_ROBE = 20,
+    INVTYPE_WEAPONMAINHAND = 21, INVTYPE_WEAPONOFFHAND = 22, INVTYPE_HOLDABLE = 23,
+    INVTYPE_THROWN = 25, INVTYPE_RANGEDRIGHT = 26,
+}
+local SKILL_LEVELS = { { 75, 5 }, { 150, 10 }, { 225, 20 }, { 300, 35 } }
+
+local function SkillLevel(skill)
+    for i = 1, #SKILL_LEVELS do
+        local step = SKILL_LEVELS[i]
+        if skill <= step[1] then return step[2] end
     end
-    local ok, advice = pcall(enchants.Advise, slot)
-    local spell = ok and advice and advice.now
-    local row = spell and ns.BiSEnchants[spell]
-    if not row then
-        return "(Optional) Enchant the " .. slotName .. " after you equip it. Naowh has no enchant for the item in that slot. Mark this done to skip it."
+    return 55
+end
+
+local function BitSet(mask, n)
+    return math.floor((mask or 0) / (2 ^ n)) % 2 == 1
+end
+
+local function EnchantFits(enchant, inv, classID, subclass)
+    if enchant.inv ~= 0 then
+        return BitSet(enchant.inv, inv) and (enchant.sub == 0 or enchant.class ~= classID or BitSet(enchant.sub, subclass))
     end
-    local name = row.text or row.enchant or ("spell " .. tostring(spell))
+    return enchant.class == classID and BitSet(enchant.sub, subclass)
+end
+
+local function EnchantLabel(enchants, spell)
+    local row = enchants[spell]
+    if type(row) ~= "table" then return "spell " .. tostring(spell), "" end
+    local effect = row.text
+    local spellName
+    if GetSpellInfo then
+        local ok, name = pcall(GetSpellInfo, spell)
+        if ok and type(name) == "string" and name ~= "" then spellName = name end
+    end
+    local label = spellName or effect or ("spell " .. tostring(spell))
+    if spellName and type(effect) == "string" and effect ~= "" then
+        label = spellName .. " (" .. effect .. ")"
+    end
     local source = ""
-    if row.source and row.source ~= "" then source = " Source: " .. row.source .. "." end
-    return "(Optional) Enchant the " .. slotName .. " with " .. tostring(name) .. "." .. source .. " This is for the item you have equipped. Mark this done to skip it."
+    if row.source == "trainer" then
+        source = " Learned from a trainer."
+    elseif row.source == "vendor" then
+        source = " Bought from a vendor."
+    elseif row.source == "drop" then
+        source = " The formula is a drop."
+    elseif type(row.source) == "string" and row.source ~= "" then
+        source = " Source: " .. row.source .. "."
+    end
+    return label, source
+end
+
+local function EnchantChoice(itemID, slot, slotName)
+    local missing = "(Optional) Enchant the " .. slotName .. " after you equip the rank 1 piece. Enchant advice loads with NaowhForever_BiS. Mark this done to skip it."
+    local ns = Namespace()
+    local enchants = ns and ns.BiSEnchants
+    local weightsOf = ns and ns.StatWeights and ns.StatWeights.For
+    local spec = SG.Specs and SG.Specs.Selected()
+    local weights = spec and weightsOf and weightsOf(spec)
+    if not enchants or not weights then return nil, missing end
+    if not itemID then
+        return nil, "(Optional) Enchant the " .. slotName .. " once that rank 1 item is known. Mark this done to skip it."
+    end
+    local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if not instant then return nil, missing end
+    local _, _, _, equipLoc, _, classID, subclass = instant(itemID)
+    local inv = equipLoc and EQUIP_BIT[equipLoc]
+    if not inv or not classID then
+        return nil, "(Optional) Enchant the " .. slotName .. " after that item has loaded. Mark this done to skip it."
+    end
+    local level = 60
+    if GetItemInfo then
+        local _, _, _, itemLevel, required = GetItemInfo(itemID)
+        if type(required) == "number" and required > 0 then
+            level = required
+        elseif type(itemLevel) == "number" and itemLevel > 0 then
+            level = itemLevel
+        end
+    end
+    local swing = 0
+    if ns.StatWeights.SwingDamage then
+        local ok, value = pcall(ns.StatWeights.SwingDamage, weights, slot)
+        if ok and type(value) == "number" then swing = value end
+    end
+    local bestSpell, bestScore, bestSkill
+    local specials = {}
+    for spell, enchant in pairs(enchants) do
+        if type(enchant) == "table" and SkillLevel(enchant.skill or 0) <= level and EnchantFits(enchant, inv, classID, subclass) then
+            if enchant.special then
+                if enchant.special == "any" or (weights[enchant.special] or 0) >= 0.3 then
+                    specials[#specials + 1] = spell
+                end
+            else
+                local score = 0
+                local stats = enchant.stats or {}
+                for stat, value in pairs(stats) do
+                    local weight = stat == "dmg" and swing or weights[stat] or 0
+                    score = score + weight * value
+                end
+                local skill = enchant.skill or 0
+                local take = not bestSpell or score > bestScore
+                if not take and score == bestScore then
+                    if skill > bestSkill or (skill == bestSkill and spell < bestSpell) then take = true end
+                end
+                if take then
+                    bestSpell, bestScore, bestSkill = spell, score, skill
+                end
+            end
+        end
+    end
+    if not bestScore or bestScore <= 0 then bestSpell = nil end
+    if not bestSpell and #specials == 0 then
+        return nil, "(Optional) The Naowh list has no enchant for the rank 1 " .. slotName .. ". Mark this done to skip it."
+    end
+    table.sort(specials)
+    local parts = {}
+    local short
+    if bestSpell then
+        local label, source = EnchantLabel(enchants, bestSpell)
+        local row = enchants[bestSpell]
+        short = (row and row.text) or label
+        parts[#parts + 1] = "(Optional) Enchant the rank 1 " .. slotName .. " with " .. label .. "." .. source
+    end
+    if #specials > 0 then
+        local bits = {}
+        for i = 1, #specials do
+            bits[#bits + 1] = EnchantLabel(enchants, specials[i])
+        end
+        parts[#parts + 1] = "Also on the list: " .. table.concat(bits, "; ") .. "."
+        if not short then short = EnchantLabel(enchants, specials[1]) end
+    end
+    parts[#parts + 1] = "This is for the rank 1 piece, not the item you are wearing. Mark this done to skip it."
+    return short, table.concat(parts, " ")
 end
 
 local function ScoreText(spec)
@@ -1501,7 +1658,7 @@ function SG.Route.Endgame()
         category = "bis",
         side = "B",
         place = "Azeroth",
-        blurb = "Rank 1 in every slot for your spec, from the Naowh list. A quest source names where to pick it up. A world drop is not treated as an auction listing unless the list says auction. Enchant lines follow the item you have equipped and are marked (Optional).",
+        blurb = "Rank 1 in every slot for your spec, from the Naowh list. A quest source names where to pick it up. A drop, an auction listing, or a quest reward shows the item icon. A world drop is not treated as an auction listing unless the list says auction. Enchant lines name the enchant for that rank 1 piece and are marked (Optional).",
         min = 60,
         max = 60,
         steps = steps,
@@ -1551,12 +1708,16 @@ function SG.Route.PaintGuide(guide)
         elseif step.role == "item" then
             local itemID = spec and spec.slots and spec.slots[step.slot] and spec.slots[step.slot][1]
             step.itemID = itemID
+            step.rewards = nil
             if itemID then
                 local name = ItemName(itemID)
-                local line, map, x, y = SourceLine(itemID)
+                local line, map, x, y, tag = SourceLine(itemID)
                 step.title = step.slotName .. ": " .. name
                 step.text = line
                 step.map, step.x, step.y = map, x, y
+                if tag == "drop" or tag == "auction" or tag == "quest" then
+                    step.rewards = { itemID }
+                end
             else
                 step.title = step.slotName
                 step.text = "The loaded list has no rank 1 item for " .. step.slotName .. "."
@@ -1564,9 +1725,15 @@ function SG.Route.PaintGuide(guide)
             end
             step.baseText = step.text
         elseif step.role == "enchant" then
-            step.text = EnchantLine(step.slot, step.slotName)
+            local itemID = spec and spec.slots and spec.slots[step.slot] and spec.slots[step.slot][1]
+            local short, text = EnchantChoice(itemID, step.slot, step.slotName)
+            step.text = text
             step.baseText = step.text
-            step.title = "(Optional) Enchant " .. step.slotName
+            if short and short ~= "" then
+                step.title = "(Optional) Enchant " .. step.slotName .. ": " .. short
+            else
+                step.title = "(Optional) Enchant " .. step.slotName
+            end
         end
     end
 end

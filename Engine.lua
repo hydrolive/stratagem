@@ -111,9 +111,15 @@ local function AcceptSentence(quest, where)
     where = AcceptWhere(quest, where)
     local giver = SG.Engine.Giver(where)
     local place = PlaceName(where)
+    if place and not place:find(",", 1, true) and quest and quest.map and quest.x and quest.y and SG.Route and SG.Route.TownNear then
+        local town = SG.Route.TownNear(quest.map, quest.x, quest.y)
+        if town and town ~= "" and not place:find(town, 1, true) then
+            place = place .. ", " .. town
+        end
+    end
     local from = giver and (" from " .. giver) or ""
     local at = place and (" in " .. place) or ""
-    return string.format("Accept %s%s%s.", quest.name, from, at)
+    return string.format("Accept %s%s%s.", quest.name, from, at), place
 end
 
 local function ChainPrior(quest)
@@ -155,6 +161,7 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         level = quest.level,
         match = match,
     }
+    local sentence, place = AcceptSentence(quest, where)
     local function add(kind, title, text, pinMap, pinX, pinY)
         -- Copy. The three steps must not share one table.
         local row = Step({
@@ -168,9 +175,10 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         row.title = title
         row.text = text
         row.chainPrior = ChainPrior(quest)
+        if kind == "accept" and place then row.placeName = place end
         steps[#steps + 1] = row
     end
-    add("accept", "Accept: " .. quest.name, AcceptSentence(quest, where))
+    add("accept", "Accept: " .. quest.name, sentence)
     add("complete", "Complete: " .. quest.name,
         string.format("Finish the objectives for %s.", quest.name))
     local turnMap, turnX, turnY, turnWho = TurnPin(quest)
@@ -339,12 +347,12 @@ local function ApplyVisibility(steps)
         local step = steps[i]
         if step.match == "hide" then
             step.visible = false
-        elseif step.match == "other" and only then
+        elseif step.match == "other" and only and not step.clear then
             step.visible = false
         else
             step.visible = true
         end
-        if step.kind == "accept" and step.match == "other" then
+        if step.kind == "accept" and step.match == "other" and only and not step.clear then
             hiddenQuests = hiddenQuests + 1
         end
     end
@@ -461,9 +469,11 @@ local function AddDungeon(steps, def, segment)
         for i = 1, #ordered do
             local quest = ordered[i].quest
             local map, x, y, where = StartPin(quest)
-            local text
+            local sentence, placeName = AcceptSentence(quest, where)
+            local text = sentence
             if StartsInside(quest) then
                 map, x, y = emap, ex, ey
+                placeName = nil
                 local note = quest.where
                 if type(note) ~= "string" or note == "" or note:find("not known yet", 1, true) then
                     note = where
@@ -473,11 +483,10 @@ local function AddDungeon(steps, def, segment)
                 else
                     text = string.format("Accept %s. It starts inside %s.", quest.name, segment.dungeon)
                 end
-            else
-                text = AcceptSentence(quest, where)
             end
             steps[#steps + 1] = Step({
                 kind = "accept",
+                clear = true,
                 questID = quest.id,
                 questName = quest.name,
                 map = map, x = x, y = y,
@@ -488,6 +497,7 @@ local function AddDungeon(steps, def, segment)
                 level = level or quest.level,
                 match = ordered[i].match,
                 chainPrior = ChainPrior(quest),
+                placeName = placeName,
                 title = "Accept: " .. quest.name,
                 text = text,
             })
@@ -505,6 +515,7 @@ local function AddDungeon(steps, def, segment)
         local list = table.concat(names, ", ")
         local run = Step({
             kind = "run",
+            clear = true,
             runs = runs,
             segment = segment.title,
             zone = place,
@@ -522,6 +533,7 @@ local function AddDungeon(steps, def, segment)
             local turn = turnWho and (" to " .. turnWho) or ""
             steps[#steps + 1] = Step({
                 kind = "turnin",
+                clear = true,
                 questID = quest.id,
                 questName = quest.name,
                 map = turnMap, x = turnX, y = turnY,
@@ -911,10 +923,9 @@ end
 function SG.Engine.RunFinished(step)
     local runs = step and step.runs
     if type(runs) ~= "table" or #runs == 0 then return true end
-    local only = SG.db and SG.db.options and SG.db.options.onlyMySpec
     for i = 1, #runs do
         local row = runs[i]
-        local skip = row.match == "hide" or (row.match == "other" and only)
+        local skip = row.match == "hide"
         if not skip then
             local completed, inLog, objectives = SG.QuestState(row.id)
             if not (completed or (inLog and objectives)) then return false end
@@ -926,11 +937,10 @@ end
 function SG.Engine.RunTrack(step)
     local runs = step and step.runs
     if type(runs) ~= "table" then return nil end
-    local only = SG.db and SG.db.options and SG.db.options.onlyMySpec
     local first
     for i = 1, #runs do
         local row = runs[i]
-        local skip = row.match == "hide" or (row.match == "other" and only)
+        local skip = row.match == "hide"
         if not skip then
             if not first then first = row.id end
             local completed, inLog, objectives = SG.QuestState(row.id)

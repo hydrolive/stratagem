@@ -319,10 +319,9 @@ function SG.StepObjectives(step)
     if step.kind == "complete" and step.questID then
         add(step.questID, step.questName)
     elseif step.kind == "run" and type(step.runs) == "table" then
-        local only = SG.db and SG.db.options and SG.db.options.onlyMySpec
         for i = 1, #step.runs do
             local row = step.runs[i]
-            local skip = row.match == "hide" or (row.match == "other" and only)
+            local skip = row.match == "hide"
             if not skip then add(row.id, row.name) end
         end
     end

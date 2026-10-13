@@ -302,7 +302,7 @@ SG.GuideData = {
                 "Pick up the Orgrimmar and Undercity quests, then clear Ragefire Chasm once.",
                 { 5730, 5725, 5724 }),
             Segment("Ruins of Lordaeron", "Undercity", 1458, 57.8, 89.8,
-                "These Undercity and Brill quests feed the Ruins of Lordaeron and are worth the trip on their own.",
+                "Accept A Frightened Request in the Sepulcher, The Wrath of Rath'mael in Brill, and Light's Justice in the Undercity before you clear the ruins.",
                 { 92422, 92421, 95216, 97290, 530 }),
         },
     }),

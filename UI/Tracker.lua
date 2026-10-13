@@ -399,15 +399,19 @@ function SG.Tracker.Update()
         frame.step:SetText(tag .. step.title)
         local dist = SG.Nav.FormatDistance(SG.Nav.Measure(step))
         local coord = SG.Nav.CoordText(step)
+        if step.placeName and step.placeName ~= "" and step.x and step.y then
+            coord = string.format("%s   %.1f, %.1f", step.placeName, step.x, step.y)
+        end
         if step.gearName and step.gearName ~= "" and step.kind ~= "turnin" then
             coord = step.gearName .. (coord ~= "" and ("    " .. coord) or "")
         end
         frame.coord:SetText(dist and (coord .. "    " .. dist) or coord)
         y = y + 18
         local rows, heights, contentH = nil, nil, 0
+        local rewardStep = step.kind == "turnin" or (step.kind == "gear" and step.rewards and step.rewards[1])
         if step.kind == "complete" or step.kind == "run" then
             rows, heights, contentH = ObjectiveRows(frame, step)
-        elseif step.kind == "turnin" then
+        elseif rewardStep then
             local rewards = step.rewards or {}
             local shown = 0
             for i = 1, #rewards do
@@ -433,7 +437,7 @@ function SG.Tracker.Update()
         if (frame.objOffset or 0) > frame.objMax then frame.objOffset = frame.objMax end
         if rows then
             ShowObjectives(frame, step, y, viewBottom, rows, heights)
-        elseif step.kind == "turnin" then
+        elseif rewardStep then
             ShowTurnIn(frame, step, y)
         end
     end
