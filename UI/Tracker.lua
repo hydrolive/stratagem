@@ -120,9 +120,12 @@ end
 
 function SG.Tracker.Update()
     local frame = SG.Tracker.frame
-    if not frame then return end
+    if not frame or SG.Tracker.updating then return end
+    SG.Tracker.updating = true
     if not SG.db.options.tracker then
         frame:Hide()
+        SG.Tracker.updating = false
+        if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
         return
     end
     local guide = SG.Engine.Active()
@@ -149,6 +152,8 @@ function SG.Tracker.Update()
         frame.step:SetText("Choose a guide to follow.")
         frame.coord:SetText("Open is on each guide in the list.")
         frame.bar:SetPercent(0)
+        SG.Tracker.updating = false
+        if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
         return
     end
     frame:Show()
@@ -182,4 +187,6 @@ function SG.Tracker.Update()
         end
         frame.coord:SetText(dist and (coord .. "    " .. dist) or coord)
     end
+    SG.Tracker.updating = false
+    if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
 end

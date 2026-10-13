@@ -26,6 +26,7 @@ SG.DB_DEFAULTS = {
         x = 0,
         y = 0,
         tracker = { point = "BOTTOM", rel = "BOTTOM", x = 280, y = 210 },
+        arrow = { point = "CENTER", rel = "CENTER", x = 0, y = 230 },
     },
     options = {
         tomtom = true,

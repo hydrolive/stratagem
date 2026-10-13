@@ -23,7 +23,7 @@ Log into the `_classic_beta_` client with Stratagem enabled.
 2. The sidebar spec should match your class. Open it and pick a spec, reload, and confirm the choice stuck. `/sg spec` prints the key.
 3. Set faction to your side. Horde 1–30 and Alliance 1–30 should list zone guides. Tauren get Camp Narache & Mulgore. Orcs and trolls get Valley of Trials & Durotar. A guide for another race stays hidden. Shamans also get Call of Fire on the Durotar guide.
 4. Select The Barrens or an Alliance zone, press Continue, and confirm the step list, progress bar, and reward rows. On a character who already did some of those quests, the tracker should jump ahead and chat should say how many steps were skipped. Accept a listed quest in game and confirm the accept step marks itself done.
-5. Continue should raise the HUD arrow with a direction and a yard distance. `/sg arrowflip` reverses it. With TomTom enabled, Continue also drops a pin, and the HUD arrow stays.
+5. Continue should raise the HUD arrow with the step name, a direction, and a yard distance. Next and Prev should retarget it. Left-click drag should move it, and a reload should keep that spot. `/sg arrowflip` reverses it. With TomTom enabled, Continue also drops a pin, and the HUD arrow stays.
 6. `/sg status` should say whether the live Naowh journal loaded or the bundled snapshot (131 quests, about level 6–34) is in use.
 
 ## How a route works
@@ -46,7 +46,7 @@ Right-click a guide in the list to favorite it. Right-click the tracker, or the 
 
 ## Navigation
 
-The HUD arrow sits above your character. It points at the current step and shows the distance in yards. `/sg arrowflip` reverses it if it points the wrong way. TomTom can still drop a pin at the same time. The arrow stays up either way. A step with no map coordinates does not raise it.
+The HUD arrow points at the step the tracker is on and shows that step's name and the distance in yards. Next, Prev, Done, and a click on a step move it. Left-click and drag to place it somewhere else. That spot is remembered. Right-click still opens the guide list. `/sg arrowflip` reverses it if it points the wrong way. TomTom can still drop a pin at the same time. The arrow stays up either way. A step with no map coordinates does not raise it. Several quests in one camp share a pin, so the direction stays put until the route leaves that pin. The name under the arrow still changes.
 
 With TomTom enabled, the current step drops a waypoint when the quest has a map id. Coordinates in the journal are 0–100 and are converted for TomTom. The quest is also super-tracked in the quest log when that option is on.
 

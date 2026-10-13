@@ -39,6 +39,10 @@ function SG.Nav.SuperTrack(questID)
 end
 
 function SG.Nav.Set(step)
+    if SG.Nav.step == step then
+        if SG.Arrow then SG.Arrow.Tick() end
+        return
+    end
     SG.Nav.step = step
     if not step then
         SG.Nav.ClearTomTom()
@@ -160,13 +164,43 @@ end
 
 SG.Arrow = {}
 
+local function SaveArrow(frame)
+    if not SG.db or not SG.db.ui then return end
+    if type(SG.db.ui.arrow) ~= "table" then SG.db.ui.arrow = {} end
+    local point, _, rel, x, y = frame:GetPoint()
+    local pos = SG.db.ui.arrow
+    pos.point, pos.rel, pos.x, pos.y = point, rel, x, y
+end
+
+-- The step the tracker is on. The arrow reads this every tick, so Next,
+-- Prev, and a click in the list move it even when nothing else calls Nav.Set.
+function SG.Arrow.Target()
+    if not SG.Engine or not SG.Engine.Active then return nil end
+    local guide = SG.Engine.Active()
+    if not guide then return nil end
+    local index = SG.Engine.ShownIndex(guide)
+    if not index then return nil end
+    return guide.steps[index]
+end
+
 function SG.Arrow.Create()
     if SG.Arrow.frame then return end
     local frame = CreateFrame("Frame", "StratagemArrow", UIParent)
-    frame:SetSize(168, 118)
-    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 230)
+    frame:SetSize(168, 132)
     frame:SetFrameStrata("HIGH")
+    frame:SetMovable(true)
+    frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    local pos = SG.db and SG.db.ui and SG.db.ui.arrow or {}
+    frame:SetPoint(pos.point or "CENTER", UIParent, pos.rel or "CENTER", pos.x or 0, pos.y or 230)
+    frame:SetScript("OnDragStart", function(self)
+        self:StartMoving()
+    end)
+    frame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveArrow(self)
+    end)
     frame:SetScript("OnMouseUp", function(_, button)
         if button == "RightButton" and SG.UI and SG.UI.ShowGuides then
             SG.UI.ShowGuides()
@@ -190,17 +224,26 @@ function SG.Arrow.Create()
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetPoint("TOP", dist, "BOTTOM", 0, -2)
     label:SetWidth(160)
+    label:SetHeight(32)
     label:SetJustifyH("CENTER")
+    label:SetWordWrap(true)
     frame.label = label
 
-    local elapsed = 0
-    frame:SetScript("OnUpdate", function(_, dt)
-        elapsed = elapsed + dt
-        if elapsed < 0.08 then return end
-        elapsed = 0
-        SG.Arrow.Tick()
-    end)
+    -- A hidden arrow does not receive OnUpdate, so the driver stays shown
+    -- and keeps the direction pointed at the current step.
+    if not SG.Arrow.driver then
+        local elapsed = 0
+        local driver = CreateFrame("Frame")
+        driver:SetScript("OnUpdate", function(_, dt)
+            elapsed = elapsed + dt
+            if elapsed < 0.08 then return end
+            elapsed = 0
+            SG.Arrow.Tick()
+        end)
+        SG.Arrow.driver = driver
+    end
     SG.Arrow.frame = frame
+    SG.Arrow.Tick()
 end
 
 local function Wrap(angle)
@@ -212,7 +255,11 @@ end
 function SG.Arrow.Tick()
     local frame = SG.Arrow.frame
     if not frame then return end
-    local step = SG.Nav.step
+    local step = SG.Arrow.Target()
+    if step ~= SG.Nav.step then
+        SG.Nav.Set(step)
+        return
+    end
     local useArrow = SG.db and SG.db.options.arrow
     if not useArrow or not step or not step.x or not step.y then
         frame:Hide()
@@ -222,7 +269,7 @@ function SG.Arrow.Tick()
     local yards, playerMap = SG.Nav.Measure(step)
     local pretty = SG.Nav.FormatDistance(yards)
     frame.dist:SetText(pretty or "—")
-    frame.label:SetText(SG.Nav.CoordText(step))
+    frame.label:SetText(step.title or step.questName or SG.Nav.CoordText(step))
     if not frame.tex.SetRotation then return end
     local map, px, py = SG.Nav.PlayerPos()
     if not map or not px or not py then
