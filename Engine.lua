@@ -569,6 +569,27 @@ function SG.Engine.FirstVisible(guide)
     return nil
 end
 
+local function Neighbor(guide, index, direction)
+    local i = index
+    while true do
+        i = i + direction
+        local step = guide.steps[i]
+        if not step then return nil end
+        if step.visible then return i end
+    end
+end
+
+-- The step the tracker and the arrow are actually on. CurrentIndex is the
+-- first required step that is not done, so it cannot move backward.
+function SG.Engine.ShownIndex(guide)
+    if not guide then return nil end
+    local row = SG.Engine.Progress(guide.id)
+    local cursor = row.cursor
+    local step = cursor and guide.steps[cursor]
+    if step and step.visible then return cursor end
+    return SG.Engine.CurrentIndex(guide)
+end
+
 function SG.Engine.Mark(guide, index, done)
     if not guide or not guide.steps[index] then return end
     SG.Engine.Progress(guide.id).done[index] = done and true or nil
@@ -589,14 +610,18 @@ function SG.Engine.SyncAll()
         for i = 1, #guide.steps do
             local step = guide.steps[i]
             if step.visible and step.questID and not step.optional then
-                local state = cache[step.questID]
-                if not state then
-                    local completed, inLog, objectives = SG.QuestState(step.questID)
-                    state = { completed, inLog, objectives }
-                    cache[step.questID] = state
-                end
-                if AutoDone(step, state[1], state[2], state[3]) then
-                    SG.Engine.Mark(guide, i, true)
+                local row = SG.Engine.Progress(guide.id)
+                -- Prev cleared this step on purpose. Leave it until Next or Done.
+                if not (row.hold and row.hold == i) then
+                    local state = cache[step.questID]
+                    if not state then
+                        local completed, inLog, objectives = SG.QuestState(step.questID)
+                        state = { completed, inLog, objectives }
+                        cache[step.questID] = state
+                    end
+                    if AutoDone(step, state[1], state[2], state[3]) then
+                        SG.Engine.Mark(guide, i, true)
+                    end
                 end
             end
         end
@@ -615,8 +640,12 @@ function SG.Engine.OnQuestUpdate()
         if SG.db.options.autoAdvance then SG.Engine.SyncAll() end
         local after = active and SG.Engine.CurrentIndex(active) or nil
         if active and before ~= after and SG.Nav and SG.Nav.following then
-            local step = after and active.steps[after] or nil
-            if step then SG.Nav.Set(step) end
+            local row = SG.Engine.Progress(active.id)
+            if not row.hold and (not row.cursor or row.cursor == before) then
+                row.cursor = after
+                local step = after and active.steps[after] or nil
+                if step then SG.Nav.Set(step) end
+            end
         end
         if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
         if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
@@ -631,11 +660,13 @@ function SG.Engine.Focus(guide, index, waypoint)
     if not guide then return end
     SG.char.active = guide.id
     SG.db.selected = guide.id
+    if index then SG.Engine.Progress(guide.id).cursor = index end
     local step = index and guide.steps[index] or nil
     if waypoint and step and SG.Nav then
         SG.Nav.following = true
         SG.Nav.Set(step)
     end
+    if SG.state then SG.state.stepIndex = index end
     if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
 end
 
@@ -646,27 +677,47 @@ function SG.Engine.Nudge(direction)
         SG.Print("Choose a guide in the list, then press Continue.")
         return
     end
-    local current = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
-    if direction == 0 and current then
-        SG.Engine.Mark(guide, current, true)
-        current = SG.Engine.CurrentIndex(guide)
-    elseif direction ~= 0 and current then
-        local index = current
-        while true do
-            index = index + direction
-            local step = guide.steps[index]
-            if not step then break end
-            if step.visible then
-                -- Walking backwards should un-complete the step you land on
-                -- only when moving forward we mark the one we left.
-                if direction > 0 then SG.Engine.Mark(guide, current, true) end
-                current = index
+    local row = SG.Engine.Progress(guide.id)
+    local current = SG.Engine.ShownIndex(guide)
+    if not current and direction < 0 then
+        for i = #guide.steps, 1, -1 do
+            if guide.steps[i].visible then
+                current = i + 1
                 break
             end
         end
     end
-    if current then SG.Engine.Focus(guide, current, true) end
+    if not current then return end
+    if direction == 0 then
+        SG.Engine.Mark(guide, current, true)
+        row.hold = nil
+        current = Neighbor(guide, current, 1)
+    elseif direction > 0 then
+        local nxt = Neighbor(guide, current, 1)
+        if nxt then
+            SG.Engine.Mark(guide, current, true)
+            row.hold = nil
+            current = nxt
+        end
+    else
+        local prev = Neighbor(guide, current, -1)
+        if prev then
+            SG.Engine.Mark(guide, prev, false)
+            row.hold = prev
+            current = prev
+        end
+    end
+    if current then
+        row.cursor = current
+        SG.Engine.Focus(guide, current, true)
+    else
+        row.cursor = nil
+        row.hold = nil
+        if SG.Nav then SG.Nav.Set(nil) end
+        if SG.state then SG.state.stepIndex = nil end
+    end
     if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
+    if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
 end
 
 function SG.Engine.WaypointCurrent()
@@ -676,7 +727,7 @@ function SG.Engine.WaypointCurrent()
         SG.Print("Choose a guide in the list, then press Continue.")
         return
     end
-    local index = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
+    local index = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)
     if index then SG.Engine.Focus(guide, index, true) end
 end
 

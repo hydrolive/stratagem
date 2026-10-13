@@ -37,7 +37,9 @@ A chain that upgrades your spec is marked on every step. **Route BiS** (gold bar
 
 Camp Narache and the Valley of Trials are the exception. Those steps are how a new character leaves the start zone. Each one is marked Starting zone, and the accept text says the reward is not best in slot. The spec filter does not remove them. Mulgore's map was redrawn, so those pins can sit off the camp. Durotar's map was not. The only best-in-slot quest in early Durotar is the shaman Call of Fire. Mulgore's only catalogued BiS quest, The Broodmother, stays on the 30–40 guide.
 
-Right-click a guide to favorite it. Double-click, **Continue**, or **Open in new tab** opens a tab (four at a time; the oldest closes). **Open in tab** replaces the guide tab you already have open. **Continue** also sets the waypoint.
+Right-click a guide in the list to favorite it. Right-click the tracker, or the HUD arrow, to open the guide list. Double-click, **Continue**, or **Open in new tab** opens a tab (four at a time; the oldest closes). **Open in tab** replaces the guide tab you already have open. **Continue** also sets the waypoint.
+
+**Prev** moves to the previous visible step and clears that step's done mark. The quest log will not immediately check it off again. **Next** marks the current step done and moves forward.
 
 ## Navigation
 
@@ -56,7 +58,7 @@ Distance uses HereBeDragons when TomTom brought it, otherwise the client's world
 | `/sg` or `/stratagem` | Open or close the window |
 | `/sg show` / `/sg hide` | Show or hide it |
 | `/sg tracker` | Show or hide the step tracker |
-| `/sg next` / `/sg prev` | Move one visible step |
+| `/sg next` / `/sg prev` | Move one visible step. Prev stays on the step it returns to. |
 | `/sg done` | Mark the current step done |
 | `/sg waypoint` | Point at the current step |
 | `/sg spec` | Print the spec key |

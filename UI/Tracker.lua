@@ -78,10 +78,36 @@ function SG.Tracker.Create()
     frame.waypoint = small("Point", 80)
     frame.done = small("Done", 148)
     frame.next = small("Next", 216)
-    frame.prev:SetScript("OnClick", function() SG.Engine.Nudge(-1) end)
-    frame.waypoint:SetScript("OnClick", function() SG.Engine.WaypointCurrent() end)
-    frame.done:SetScript("OnClick", function() SG.Engine.Nudge(0) end)
-    frame.next:SetScript("OnClick", function() SG.Engine.Nudge(1) end)
+    local function onStep(nudge)
+        return function(_, button)
+            if button == "RightButton" then
+                if SG.UI and SG.UI.ShowGuides then SG.UI.ShowGuides() end
+            else
+                nudge()
+            end
+        end
+    end
+    frame.prev:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    frame.waypoint:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    frame.done:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    frame.next:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    frame.prev:SetScript("OnClick", onStep(function() SG.Engine.Nudge(-1) end))
+    frame.waypoint:SetScript("OnClick", onStep(function() SG.Engine.WaypointCurrent() end))
+    frame.done:SetScript("OnClick", onStep(function() SG.Engine.Nudge(0) end))
+    frame.next:SetScript("OnClick", onStep(function() SG.Engine.Nudge(1) end))
+    frame:RegisterForClicks("RightButtonUp")
+    frame:SetScript("OnClick", function(_, button)
+        if button == "RightButton" and SG.UI and SG.UI.ShowGuides then
+            SG.UI.ShowGuides()
+        end
+    end)
+    frame:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Stratagem", 0.85, 0.7, 1)
+        GameTooltip:AddLine("Right-click to choose a guide.", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
     local choose = SG.Widgets.Button(frame, "Choose a guide", "primary")
     choose:SetPoint("BOTTOMLEFT", 12, 10)
     choose:SetPoint("BOTTOMRIGHT", -12, 10)
@@ -131,7 +157,7 @@ function SG.Tracker.Update()
     local percent = total > 0 and (done / total) or 0
     frame.bar:SetPercent(percent, total > 0 and done == total)
     frame.count:SetText(string.format("%d / %d", done, total))
-    local index = SG.Engine.CurrentIndex(guide)
+    local index = SG.Engine.ShownIndex(guide)
     local step = index and guide.steps[index] or nil
     if not step then
         frame.step:SetTextColor(SG.RGB(SG.Theme.text))

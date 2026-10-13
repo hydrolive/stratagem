@@ -7,7 +7,7 @@ WoW Forever leveling guide. Target client: `D:\WoW\World of Warcraft\_classic_be
 - Window: left categories, center guide list, right detail. Dark navy panels, violet actions, gold labels. Categories: All guides, Leveling, Professions, Reputation, Exploration, Legacy, Collectibles, Dungeons, Favorites, Options.
 - Guides are grouped by bracket and zone (Horde and Alliance, 1–30 and 30–40, plus the other categories).
 - Detail shows the zone, level range, faction, step count, progress, Continue, Open in tab, and Open in new tab. Each guide row has an Open button. The first visible guide is selected so Continue is available without an extra click. Continue opens the guide and sets the waypoint. Open in tab replaces the current guide tab. Open in new tab adds one, up to four.
-- Until a guide has been started, login opens the window. The tracker shows Choose a guide instead of step buttons. Prev, Next, Done, and Point open that window when nothing is selected.
+- Until a guide has been started, login opens the window. The tracker shows Choose a guide instead of step buttons. Prev, Next, Done, and Point open that window when nothing is selected. Prev moves to the previous visible step and clears its done mark so the tracker stays there. Right-click the tracker or the HUD arrow opens the guide list.
 - Each quest is accept, complete, then turn in. Travel and "level toward" notes are optional and do not count. Progress is per character.
 - Spec is chosen in the sidebar or with `/sg spec <key>`. Keys match NaowhForever_BiS (`arms-warrior`, `feral-dps-druid`, `feral-tank-druid`, …). Auto-detect uses the classic talent tab. Feral tank shares tab 2 with feral DPS and stays a manual choice.
 - Wrong class, race, or faction is never shown. "Only quests that are BiS for my spec" hides rewards ranked for other specs. A journal BiS quest that the top-10 ranking slice names for nobody stays visible.
@@ -50,6 +50,6 @@ Each completed prompt is one commit, then a push to `origin` `main` on `https://
 
 ## Last change
 
-Leveling routes keep their written quest order. A quest that ranks for your class is inserted into that zone's guide when the route did not already list it. Chains already on the guide show a gold bar and Route BiS. Inserted chains show a violet bar and Added BiS. The HUD arrow points at the current step and shows the distance in yards, whether or not TomTom is enabled.
+Prev on the tracker steps back to the previous visible step and leaves it unmarked, so the tracker and the arrow stay on it. Right-click the tracker or the HUD arrow opens the guide list.
 
-`/reload`. Open a zone guide and press Continue. Walk. The arrow should turn as you turn, and the yard number should fall as you approach. A spec upgrade that was not written into the route appears as Added BiS. One that was already listed appears as Route BiS. Change spec in the sidebar and the badges follow the new spec. `/sg arrowflip` if the arrow points backward.
+`/reload`. Continue a guide, press Next, then Prev. The tracker should show the earlier step. Right-click the tracker. The window should open on the guide list.

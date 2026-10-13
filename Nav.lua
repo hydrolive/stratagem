@@ -166,6 +166,12 @@ function SG.Arrow.Create()
     frame:SetSize(168, 118)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 230)
     frame:SetFrameStrata("HIGH")
+    frame:EnableMouse(true)
+    frame:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" and SG.UI and SG.UI.ShowGuides then
+            SG.UI.ShowGuides()
+        end
+    end)
     frame:Hide()
 
     local tex = frame:CreateTexture(nil, "OVERLAY")

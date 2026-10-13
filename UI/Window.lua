@@ -77,7 +77,7 @@ function SG.UI.OpenInPlace(id)
     SG.char.active = id
     SG.RememberRecent(id)
     local guide = SG.Engine.Get(id)
-    SG.state.stepIndex = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
+    SG.state.stepIndex = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)
     SG.UI.Refresh(true)
 end
 
@@ -97,7 +97,7 @@ function SG.UI.OpenTab(id, refresh)
     SG.char.active = id
     SG.RememberRecent(id)
     local guide = SG.Engine.Get(id)
-    SG.state.stepIndex = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
+    SG.state.stepIndex = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)
     if refresh ~= false then SG.UI.Refresh(true) end
 end
 
@@ -114,7 +114,7 @@ function SG.UI.Continue(id)
     local guide = SG.Engine.Get(id)
     if not guide then return end
     SG.UI.OpenTab(id, false)
-    local index = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
+    local index = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)
     SG.state.stepIndex = index
     if index then SG.Engine.Focus(guide, index, true) end
     SG.UI.Refresh(true)
@@ -125,6 +125,17 @@ function SG.UI.Show()
     if not SG.db then return end
     if not SG.UI.frame then SG.UI.Create() end
     if SG.UI.frame then SG.UI.frame:Show() end
+end
+
+function SG.UI.ShowGuides()
+    if not SG.db then return end
+    if not SG.UI.frame then SG.UI.Create() end
+    if not SG.UI.frame then return end
+    SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
+    if SG.db.category == "options" then SG.db.category = "all" end
+    SG.state.tab = "home"
+    SG.UI.frame:Show()
+    SG.UI.Refresh(true)
 end
 
 function SG.UI.Toggle()
