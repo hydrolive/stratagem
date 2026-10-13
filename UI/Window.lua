@@ -556,7 +556,7 @@ function SG.UI.BuildOptions(parent)
         SG.db.options.tomtom = on
         SG.Arrow.Tick()
     end)
-    checks[#checks + 1] = addCheck("On-screen arrow when TomTom is not steering", function() return SG.db.options.arrow end, function(on)
+    checks[#checks + 1] = addCheck("HUD arrow with direction and distance", function() return SG.db.options.arrow end, function(on)
         SG.db.options.arrow = on
         SG.Arrow.Tick()
     end)
@@ -850,7 +850,18 @@ function SG.UI.PaintStep(row)
         SG.Paint(row.bg, on and T.rowOn or T.row)
         row.title:SetTextColor(SG.RGB(T.text))
     end
-    if on then row.bar:Show() else row.bar:Hide() end
+    if row.bisFrom == "added" then
+        SG.Paint(row.bar, T.accent)
+        row.bar:Show()
+    elseif row.bisFrom == "guide" then
+        SG.Paint(row.bar, T.gold)
+        row.bar:Show()
+    elseif on then
+        SG.Paint(row.bar, T.accent)
+        row.bar:Show()
+    else
+        row.bar:Hide()
+    end
 end
 
 function SG.UI.RefreshTabs()
@@ -1059,17 +1070,30 @@ function SG.UI.RefreshSteps(resetScroll)
             row.title:SetText(prefix .. step.title)
             local bits = {}
             if step.level and step.questID then bits[#bits + 1] = "Lv " .. step.level end
-            if step.rank and step.slotName then
-                bits[#bits + 1] = string.format("BiS %s rank %d", step.slotName, step.rank)
+            if step.bisFrom == "added" then
+                bits[#bits + 1] = "Added BiS"
+            elseif step.bisFrom == "guide" then
+                bits[#bits + 1] = "Route BiS"
             elseif step.match == "path" and not step.optional then
                 bits[#bits + 1] = "Starting zone"
-            elseif step.optional then
+            end
+            if step.rank and step.slotName then
+                bits[#bits + 1] = string.format("%s rank %d", step.slotName, step.rank)
+            elseif step.optional and step.bisFrom == nil then
                 bits[#bits + 1] = "Optional"
             end
             if step.x and step.y then
                 bits[#bits + 1] = string.format("%.1f, %.1f", step.x, step.y)
             end
             row.sub:SetText(table.concat(bits, "   "))
+            row.bisFrom = step.bisFrom
+            if step.bisFrom == "added" then
+                row.sub:SetTextColor(SG.RGB(T.accentHot))
+            elseif step.bisFrom == "guide" then
+                row.sub:SetTextColor(SG.RGB(T.gold))
+            else
+                row.sub:SetTextColor(SG.RGB(T.muted))
+            end
             SG.UI.PaintStep(row)
             y = y + 52
         end
@@ -1169,11 +1193,19 @@ function SG.UI.RefreshDetail()
 
     if stepMode and step then
         detail.primary:Enable()
-        detail.eyebrow:SetText(guide.title)
+        if step.bisFrom == "added" then
+            detail.eyebrow:SetText("ADDED FOR YOUR SPEC")
+        elseif step.bisFrom == "guide" then
+            detail.eyebrow:SetText("ON THE ROUTE  ·  BIS")
+        else
+            detail.eyebrow:SetText(guide.title)
+        end
         detail.title:SetText(step.title)
         detail.meta:SetText(string.format("%s    %d-%d", SG.SideName(guide.side), guide.min or 1, guide.max or 60))
         detail.blurb:SetText(step.text or "")
-        detail.zone:SetText(SG.Nav.CoordText(step))
+        local dist = SG.Nav.FormatDistance(SG.Nav.Measure(step))
+        local coord = SG.Nav.CoordText(step)
+        detail.zone:SetText(dist and (coord .. "    " .. dist) or coord)
         detail.primary:SetLabel("Set waypoint")
         detail.primary:SetScript("OnClick", function()
             SG.Engine.Focus(guide, step.index, true)

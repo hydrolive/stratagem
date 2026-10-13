@@ -116,7 +116,7 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
     add("accept", "Accept: " .. quest.name,
         string.format("Accept %s%s.%s", quest.name, from, reward))
     add("complete", "Complete: " .. quest.name,
-        string.format("Finish the objectives for %s. The reward is why this quest is on the route.", quest.name))
+        string.format("Finish the objectives for %s.", quest.name))
     local turn = giver and (" to " .. giver) or ""
     local choice = quest.choice and " If several pieces are offered, take the one ranked for your spec." or ""
     add("turnin", "Turn in: " .. quest.name,
@@ -187,6 +187,128 @@ local function AddPlain(steps, guide, segment, quest, prevLevel, gaps)
     local turn = giver and (" to " .. giver) or ""
     add("turnin", "Turn in: " .. quest.name,
         string.format("Turn in %s%s.", quest.name, turn))
+end
+
+local function RankedForClass(quest)
+    local specs = SG.classToken and SG.Specs.ForClass(SG.classToken)
+    if not specs then return SG.BiS.RankedForAnyone(quest) end
+    for i = 1, #specs do
+        local _, rank = SG.BiS.BestReward(quest, specs[i].key)
+        if rank then return true end
+    end
+    return false
+end
+
+-- The written route stays as authored. A quest that actually ranks for this
+-- class is inserted when that zone guide does not already contain it.
+-- Membership does not depend on the selected spec, so step indexes stay put
+-- when the player switches spec. The badge is applied afterwards.
+local function InjectUpgrades(steps, def)
+    local added = {}
+    if (def.category or "leveling") ~= "leveling" then return added end
+    local have = {}
+    for i = 1, #steps do
+        if steps[i].questID then have[steps[i].questID] = true end
+    end
+    local zoneSeg, mapSeg = {}, {}
+    local segments = def.segments or {}
+    for i = 1, #segments do
+        local segment = segments[i]
+        local title = segment.title
+        local zone = segment.zone or title
+        if zone and (not zoneSeg[zone] or title == zone) then zoneSeg[zone] = title end
+        if title and not zoneSeg[title] then zoneSeg[title] = title end
+        local map = segment.arrive and segment.arrive.map
+        if map and not mapSeg[map] then mapSeg[map] = title end
+    end
+    if def.place and not zoneSeg[def.place] then zoneSeg[def.place] = def.place end
+    local minLevel = def.min or 1
+    local maxLevel = def.max or 60
+    local extra = {}
+    local quests = SG.BiS.quests or {}
+    for i = 1, #quests do
+        local quest = quests[i]
+        if not have[quest.id] and quest.level and quest.level >= minLevel and quest.level <= maxLevel then
+            if SG.BiS.Match(quest, def.side) ~= "hide" and RankedForClass(quest) then
+                local seg
+                if quest.dungeon then
+                    seg = zoneSeg[quest.dungeon]
+                else
+                    seg = (quest.zone and zoneSeg[quest.zone]) or (quest.map and mapSeg[quest.map])
+                end
+                if seg then
+                    extra[#extra + 1] = { quest = quest, segment = seg }
+                end
+            end
+        end
+    end
+    table.sort(extra, function(a, b)
+        if a.quest.level ~= b.quest.level then return a.quest.level < b.quest.level end
+        return a.quest.id < b.quest.id
+    end)
+    for n = 1, #extra do
+        local quest = extra[n].quest
+        local segTitle = extra[n].segment
+        local insertAt, last = nil, nil
+        for s = 1, #steps do
+            local step = steps[s]
+            if step.segment == segTitle then
+                last = s
+                if not insertAt and step.questID and step.level and step.level > quest.level then
+                    insertAt = s
+                end
+            end
+        end
+        local at = insertAt or (last and (last + 1)) or (#steps + 1)
+        local chunk = {}
+        AddQuest(chunk, def, {
+            title = segTitle,
+            zone = quest.zone or segTitle,
+            arrive = { map = quest.map, x = quest.x, y = quest.y },
+        }, quest, nil, false)
+        for c = 1, #chunk do
+            table.insert(steps, at, chunk[c])
+            at = at + 1
+        end
+        added[quest.id] = true
+    end
+    return added
+end
+
+local function ReplacePlain(text, old, new)
+    if not text then return text end
+    local a, b = text:find(old, 1, true)
+    if not a then return text end
+    return text:sub(1, a - 1) .. new .. text:sub(b + 1)
+end
+
+local function TagUpgrades(steps, added)
+    local spec = SG.Specs.Selected()
+    for i = 1, #steps do
+        local step = steps[i]
+        local quest = step.questID and SG.BiS.Quest(step.questID)
+        if quest and step.match ~= "hide" then
+            local itemID, rank, slot = SG.BiS.BestReward(quest, spec)
+            if rank then
+                step.bisFrom = added[step.questID] and "added" or "guide"
+                step.rank = rank
+                step.slot = slot
+                step.slotName = slot and SG.SLOT_NAME[slot] or nil
+                step.itemID = itemID
+                step.rewards = quest.rewards
+                step.choice = quest.choice
+                if step.kind == "accept" and step.bisFrom == "added" then
+                    step.text = "Added for your spec. " .. (step.text or "")
+                elseif step.kind == "accept" then
+                    step.text = ReplacePlain(
+                        step.text,
+                        " Its reward is not best in slot.",
+                        " Its reward is best in slot for your spec."
+                    )
+                end
+            end
+        end
+    end
 end
 
 local function ApplyVisibility(steps)
@@ -273,6 +395,8 @@ function SG.Engine.Compile(def)
             end
         end
     end
+    local added = InjectUpgrades(steps, def)
+    TagUpgrades(steps, added)
     for i = 1, #steps do
         steps[i].index = i
         steps[i].guide = def.id

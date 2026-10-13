@@ -119,6 +119,7 @@ function SG.Tracker.Update()
         frame:Show()
         steps(false)
         frame.count:SetText("")
+        frame.step:SetTextColor(SG.RGB(SG.Theme.text))
         frame.step:SetText("Choose a guide to follow.")
         frame.coord:SetText("Open is on each guide in the list.")
         frame.bar:SetPercent(0)
@@ -133,10 +134,23 @@ function SG.Tracker.Update()
     local index = SG.Engine.CurrentIndex(guide)
     local step = index and guide.steps[index] or nil
     if not step then
+        frame.step:SetTextColor(SG.RGB(SG.Theme.text))
         frame.step:SetText(guide.title .. " is complete.")
         frame.coord:SetText(guide.place or "")
     else
-        frame.step:SetText(step.title)
-        frame.coord:SetText(SG.Nav.CoordText(step))
+        local tag = ""
+        if step.bisFrom == "added" then
+            tag = "Added BiS   "
+            frame.step:SetTextColor(SG.RGB(SG.Theme.accentHot))
+        elseif step.bisFrom == "guide" then
+            tag = "Route BiS   "
+            frame.step:SetTextColor(SG.RGB(SG.Theme.gold))
+        else
+            frame.step:SetTextColor(SG.RGB(SG.Theme.text))
+        end
+        frame.step:SetText(tag .. step.title)
+        local dist = SG.Nav.FormatDistance(SG.Nav.Measure(step))
+        local coord = SG.Nav.CoordText(step)
+        frame.coord:SetText(dist and (coord .. "    " .. dist) or coord)
     end
 end

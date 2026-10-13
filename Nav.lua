@@ -1,5 +1,5 @@
 -- Nav.lua: TomTom when it is installed, the quest log's own super-track,
--- and a small on-screen arrow for the same-map case.
+-- and a HUD arrow that points at the step and shows the distance.
 local _, SG = ...
 if type(SG) ~= "table" then
     SG = _G.Stratagem or {}
@@ -93,24 +93,96 @@ function SG.Nav.CoordText(step)
     return mapName
 end
 
+local function HereBeDragons()
+    if not LibStub then return nil end
+    return LibStub("HereBeDragons-2.0", true)
+end
+
+-- x and y are 0-1. Returns instance, worldX, worldY when the client can convert.
+local function WorldXY(map, x, y)
+    if not map or not x or not y then return nil end
+    if C_Map and C_Map.GetWorldPosFromMapPos and CreateVector2D then
+        local inst, wx, wy = C_Map.GetWorldPosFromMapPos(map, CreateVector2D(x, y))
+        if type(wx) == "number" and type(wy) == "number" then
+            return inst, wx, wy
+        end
+        if type(wx) == "table" then
+            local px, py = wx.x, wx.y
+            if wx.GetXY then px, py = wx:GetXY() end
+            if type(px) == "number" and type(py) == "number" then
+                return inst, px, py
+            end
+        end
+    end
+    local hbd = HereBeDragons()
+    if hbd and hbd.GetWorldCoordinatesFromZone then
+        local wx, wy, inst = hbd:GetWorldCoordinatesFromZone(x, y, map)
+        if type(wx) == "number" and type(wy) == "number" then
+            return inst, wx, wy
+        end
+    end
+end
+
+function SG.Nav.Measure(step)
+    if not step or not step.map or not step.x or not step.y then return nil end
+    local map, px, py = SG.Nav.PlayerPos()
+    if not map or not px or not py then return nil end
+    local hbd = HereBeDragons()
+    if hbd and hbd.GetZoneDistance then
+        local dist = hbd:GetZoneDistance(map, px, py, step.map, step.x / 100, step.y / 100)
+        if type(dist) == "number" then return dist, map end
+    end
+    local inst1, x1, y1 = WorldXY(map, px, py)
+    local inst2, x2, y2 = WorldXY(step.map, step.x / 100, step.y / 100)
+    if x1 and x2 and (not inst1 or not inst2 or inst1 == inst2) then
+        local dx = x2 - x1
+        local dy = y2 - y1
+        return math.sqrt(dx * dx + dy * dy), map
+    end
+    -- Same map, and neither HereBeDragons nor the world-position API answered.
+    -- 42 yards per map percent is only a stand-in so the HUD still shows a range.
+    if map == step.map then
+        local dx = ((step.x / 100) - px) * 4200
+        local dy = ((step.y / 100) - py) * 4200
+        return math.sqrt(dx * dx + dy * dy), map
+    end
+    return nil, map
+end
+
+function SG.Nav.FormatDistance(yards)
+    if type(yards) ~= "number" then return nil end
+    if yards < 8 then return "Here" end
+    if yards >= 10000 then
+        return string.format("%.1fk yd", yards / 1000)
+    end
+    return string.format("%d yd", math.floor(yards + 0.5))
+end
+
 SG.Arrow = {}
 
 function SG.Arrow.Create()
     if SG.Arrow.frame then return end
     local frame = CreateFrame("Frame", "StratagemArrow", UIParent)
-    frame:SetSize(72, 92)
+    frame:SetSize(168, 118)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 230)
     frame:SetFrameStrata("HIGH")
     frame:Hide()
 
     local tex = frame:CreateTexture(nil, "OVERLAY")
     tex:SetSize(56, 56)
-    tex:SetPoint("TOP")
+    tex:SetPoint("TOP", 0, -4)
     tex:SetTexture(SG.MEDIA .. "arrow.tga")
     frame.tex = tex
 
+    local dist = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    dist:SetPoint("TOP", tex, "BOTTOM", 0, -2)
+    dist:SetWidth(160)
+    dist:SetJustifyH("CENTER")
+    dist:SetTextColor(0.93, 0.78, 0.45, 1)
+    frame.dist = dist
+
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    label:SetPoint("BOTTOM", 0, 0)
+    label:SetPoint("TOP", dist, "BOTTOM", 0, -2)
     label:SetWidth(160)
     label:SetJustifyH("CENTER")
     frame.label = label
@@ -135,22 +207,39 @@ function SG.Arrow.Tick()
     local frame = SG.Arrow.frame
     if not frame then return end
     local step = SG.Nav.step
-    local useArrow = SG.db and SG.db.options.arrow and not TomTomOn()
+    local useArrow = SG.db and SG.db.options.arrow
     if not useArrow or not step or not step.x or not step.y then
         frame:Hide()
         return
     end
     frame:Show()
+    local yards, playerMap = SG.Nav.Measure(step)
+    local pretty = SG.Nav.FormatDistance(yards)
+    frame.dist:SetText(pretty or "—")
     frame.label:SetText(SG.Nav.CoordText(step))
-    local map, px, py = SG.Nav.PlayerPos()
     if not frame.tex.SetRotation then return end
-    if not map or map ~= step.map or not px or not py then
+    local map, px, py = SG.Nav.PlayerPos()
+    if not map or not px or not py then
         frame.tex:SetRotation(0)
         return
     end
     -- Map x grows east and map y grows south. Facing 0 is north.
-    local dx = (step.x / 100) - px
-    local dy = (step.y / 100) - py
+    local dx, dy
+    if map == step.map then
+        dx = (step.x / 100) - px
+        dy = (step.y / 100) - py
+    else
+        local _, x1, y1 = WorldXY(map, px, py)
+        local _, x2, y2 = WorldXY(step.map, step.x / 100, step.y / 100)
+        if not x1 or not x2 then
+            frame.tex:SetRotation(0)
+            if not pretty then frame.dist:SetText(playerMap and "Other zone" or "—") end
+            return
+        end
+        -- World positions from the map API use +x east and +y north.
+        dx = x2 - x1
+        dy = y1 - y2
+    end
     local atan2 = math.atan2 or math.atan
     local target = atan2(dx, -dy)
     local facing = GetPlayerFacing and GetPlayerFacing() or 0

@@ -1,6 +1,6 @@
 # Stratagem
 
-A free leveling-guide addon for the WoW Forever client (`World of Warcraft\_classic_beta_`, interface 16001). The route follows quests that reward best-in-slot gear for your class and spec, so the character stays geared. It is not a speedrun.
+A free leveling-guide addon for the WoW Forever client (`World of Warcraft\_classic_beta_`, interface 16001). The route is the zone quest list, in order. When a quest rewards a best-in-slot piece for your spec and the route did not already include it, that chain is added. It is not a speedrun.
 
 The window is a dark navy browser: categories on the left, guides in the middle, the selected route on the right. Several guides can be open in tabs.
 
@@ -22,7 +22,7 @@ Log into the `_classic_beta_` client with Stratagem enabled.
 2. The sidebar spec should match your class. Open it and pick a spec, reload, and confirm the choice stuck. `/sg spec` prints the key.
 3. Set faction to your side. Horde 1–30 and Alliance 1–30 should list zone guides. Tauren get Camp Narache & Mulgore. Orcs and trolls get Valley of Trials & Durotar. A guide for another race stays hidden. Shamans also get Call of Fire on the Durotar guide.
 4. Select The Barrens or an Alliance zone, press Continue, and confirm the step list, progress bar, and reward rows. Accept the quest in game and confirm the accept step marks itself done.
-5. With TomTom enabled, Continue should drop a pin. Disable TomTom, or turn its option off, and the on-screen arrow should show coordinates. `/sg arrowflip` reverses it.
+5. Continue should raise the HUD arrow with a direction and a yard distance. `/sg arrowflip` reverses it. With TomTom enabled, Continue also drops a pin, and the HUD arrow stays.
 6. `/sg status` should say whether the live Naowh journal loaded or the bundled snapshot (131 quests, about level 6–34) is in use.
 
 ## How a route works
@@ -33,17 +33,21 @@ Each quest on a route is three steps: accept, complete, turn in. Travel and "lev
 
 **Only quests that are BiS for my spec** hides rewards that are ranked for a different spec. A quest still shows when the catalog lists it as BiS but the top-10 ranking slice does not name your spec. Quests for another class, race, or faction are always hidden. A guide with nothing left for you disappears from the list.
 
+A chain that upgrades your spec is marked on every step. **Route BiS** (gold bar) means the quest was already in the guide. **Added BiS** (violet bar) means it was inserted because the written route did not have it. The tracker and the detail panel use the same labels. Changing spec moves the badges. It does not rebuild the step order.
+
 Camp Narache and the Valley of Trials are the exception. Those steps are how a new character leaves the start zone. Each one is marked Starting zone, and the accept text says the reward is not best in slot. The spec filter does not remove them. Mulgore's map was redrawn, so those pins can sit off the camp. Durotar's map was not. The only best-in-slot quest in early Durotar is the shaman Call of Fire. Mulgore's only catalogued BiS quest, The Broodmother, stays on the 30–40 guide.
 
 Right-click a guide to favorite it. Double-click, **Continue**, or **Open in new tab** opens a tab (four at a time; the oldest closes). **Open in tab** replaces the guide tab you already have open. **Continue** also sets the waypoint.
 
 ## Navigation
 
+The HUD arrow sits above your character. It points at the current step and shows the distance in yards. `/sg arrowflip` reverses it if it points the wrong way. TomTom can still drop a pin at the same time. The arrow stays up either way. A step with no map coordinates does not raise it.
+
 With TomTom enabled, the current step drops a waypoint when the quest has a map id. Coordinates in the journal are 0–100 and are converted for TomTom. The quest is also super-tracked in the quest log when that option is on.
 
 Some turn-ins name a place in the text but have no map id (Grimand's Armor is one). Those steps show the written coordinates and do not drop a pin. The map id is not guessed.
 
-The built-in arrow is used when TomTom is not steering. It points only while you are on the same map as the step. `/sg arrowflip` reverses it if it points the wrong way on your client.
+Distance uses HereBeDragons when TomTom brought it, otherwise the client's world-position API. On the same map, if neither is available, the number is an estimate (42 yards per map percent). From another zone the arrow still shows the distance when a world position exists, and it waits to turn until it can.
 
 ## Slash commands
 
