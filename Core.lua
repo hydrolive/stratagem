@@ -337,6 +337,40 @@ function SG.QuestProgressText(step)
     return table.concat(parts, "\n")
 end
 
+-- A chain marker is only for a quest that has earlier quests. The tooltip
+-- lists those names. It does not list the quests that come after.
+function SG.HasChain(step)
+    if not step then return false end
+    if type(step.chainPrior) == "table" and #step.chainPrior > 0 then return true end
+    if type(step.chainLinks) == "table" and #step.chainLinks > 0 then return true end
+    return false
+end
+
+function SG.ShowChainTip(owner, step)
+    if not owner or not SG.HasChain(step) or not GameTooltip then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Quest chain", 0.93, 0.78, 0.45)
+    local function priors(list)
+        GameTooltip:AddLine("Previous quests:", 0.62, 0.64, 0.73)
+        for i = 1, #list do
+            GameTooltip:AddLine(list[i], 0.85, 0.85, 0.85)
+        end
+    end
+    if type(step.chainLinks) == "table" and #step.chainLinks > 0 then
+        for i = 1, #step.chainLinks do
+            local link = step.chainLinks[i]
+            local prior = link and link.prior
+            if type(prior) == "table" and #prior > 0 then
+                GameTooltip:AddLine(link.name or "Quest", 1, 1, 1)
+                priors(prior)
+            end
+        end
+    else
+        priors(step.chainPrior)
+    end
+    GameTooltip:Show()
+end
+
 function SG.InitDB()
     if type(_G.StratagemDB) ~= "table" then _G.StratagemDB = {} end
     if type(_G.StratagemCharDB) ~= "table" then _G.StratagemCharDB = {} end

@@ -61,6 +61,34 @@ function SG.Tracker.Create()
     step:SetHeight(36)
     frame.step = step
 
+    local chain = CreateFrame("Button", nil, frame)
+    chain:SetSize(16, 16)
+    chain:SetFrameLevel(frame:GetFrameLevel() + 5)
+    chain:SetPoint("TOPRIGHT", -10, -46)
+    local chainTex = chain:CreateTexture(nil, "ARTWORK")
+    chainTex:SetAllPoints()
+    chainTex:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")
+    chainTex:SetVertexColor(SG.RGB(SG.Theme.gold))
+    chain:SetScript("OnEnter", function(self)
+        local guide = SG.Engine.Active()
+        local index = guide and SG.Engine.ShownIndex(guide)
+        local current = index and guide.steps[index]
+        if current and SG.ShowChainTip then SG.ShowChainTip(self, current) end
+    end)
+    chain:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    chain:Hide()
+    frame.chain = chain
+    frame:EnableMouseWheel(true)
+    frame:SetScript("OnMouseWheel", function(self, delta)
+        local maxScroll = self.objMax or 0
+        if maxScroll <= 0 then return end
+        local offset = (self.objOffset or 0) - delta * 28
+        if offset < 0 then offset = 0 end
+        if offset > maxScroll then offset = maxScroll end
+        self.objOffset = offset
+        SG.Tracker.Update()
+    end)
+
     local coord = SG.Widgets.Text(frame, 11)
     coord:SetPoint("TOPLEFT", 12, -78)
     coord:SetPoint("TOPRIGHT", -12, -78)
@@ -126,8 +154,7 @@ local function Line(frame, index)
     frame.lines = frame.lines or {}
     line = SG.Widgets.Text(frame, 11)
     line:SetJustifyH("LEFT")
-    line:SetWordWrap(false)
-    line:SetHeight(14)
+    line:SetWordWrap(true)
     line:Hide()
     frame.lines[index] = line
     return line
@@ -234,28 +261,52 @@ local function ShowTurnIn(frame, step, y)
     return y
 end
 
-local function ShowObjectives(frame, step, y)
+local function ObjectiveRows(frame, step)
     local rows = SG.StepObjectives and SG.StepObjectives(step) or {}
-    local cap = #rows
-    if cap > 16 then cap = 16 end
-    for i = 1, cap do
-        local row = rows[i]
+    local heights = {}
+    local total = 0
+    for i = 1, #rows do
         local line = Line(frame, i)
-        line:ClearAllPoints()
-        line:SetPoint("TOPLEFT", 12, -y)
-        line:SetPoint("TOPRIGHT", -12, -y)
-        line:SetText(row.text or "")
-        if row.finished then
-            line:SetTextColor(SG.RGB(SG.Theme.good))
-        else
-            line:SetTextColor(SG.RGB(SG.Theme.text))
+        line:SetWidth(276)
+        line:SetText(rows[i].text or "")
+        local h = line:GetStringHeight() or 0
+        if h < 14 then
+            local text = rows[i].text or ""
+            local lines = math.floor((#text + 45) / 46)
+            if lines < 1 then lines = 1 end
+            h = lines * 14
         end
-        line:Show()
-        y = y + 14
+        heights[i] = h
+        total = total + h + 2
+    end
+    return rows, heights, total
+end
+
+local function ShowObjectives(frame, step, y, viewBottom, rows, heights)
+    local offset = frame.objOffset or 0
+    local cursor = 0
+    for i = 1, #rows do
+        local line = Line(frame, i)
+        local top = y + cursor - offset
+        local bottom = top + heights[i]
+        cursor = cursor + heights[i] + 2
+        if bottom > y and top < viewBottom then
+            line:ClearAllPoints()
+            line:SetPoint("TOPLEFT", 12, -top)
+            line:SetPoint("TOPRIGHT", -12, -top)
+            line:SetHeight(heights[i])
+            if rows[i].finished then
+                line:SetTextColor(SG.RGB(SG.Theme.good))
+            else
+                line:SetTextColor(SG.RGB(SG.Theme.text))
+            end
+            line:Show()
+        else
+            line:Hide()
+        end
     end
     local pool = frame.lines or {}
-    for i = cap + 1, #pool do pool[i]:Hide() end
-    return y
+    for i = #rows + 1, #pool do pool[i]:Hide() end
 end
 
 function SG.Tracker.Update()
@@ -288,6 +339,8 @@ function SG.Tracker.Update()
         frame:Show()
         frame:SetHeight(148)
         HideExtras(frame)
+        if frame.chain then frame.chain:Hide() end
+        frame.objMax = 0
         steps(false)
         frame.count:SetText("")
         frame.step:SetTextColor(SG.RGB(SG.Theme.text))
@@ -311,12 +364,28 @@ function SG.Tracker.Update()
     frame.coord:ClearAllPoints()
     frame.coord:SetPoint("TOPLEFT", 12, -y)
     frame.coord:SetPoint("TOPRIGHT", -12, -y)
+    if frame.objStep ~= step then
+        frame.objStep = step
+        frame.objOffset = 0
+    end
     if not step then
         frame:SetHeight(148)
+        frame.objMax = 0
+        if frame.chain then frame.chain:Hide() end
+        frame.step:ClearAllPoints()
+        frame.step:SetPoint("TOPLEFT", 12, -40)
+        frame.step:SetPoint("TOPRIGHT", -12, -40)
         frame.step:SetTextColor(SG.RGB(SG.Theme.text))
         frame.step:SetText(guide.title .. " is complete.")
         frame.coord:SetText(guide.place or "")
     else
+        local chained = SG.HasChain and SG.HasChain(step)
+        if frame.chain then
+            if chained then frame.chain:Show() else frame.chain:Hide() end
+        end
+        frame.step:ClearAllPoints()
+        frame.step:SetPoint("TOPLEFT", 12, -40)
+        frame.step:SetPoint("TOPRIGHT", chained and -32 or -12, -40)
         local tag = ""
         if step.bisFrom == "level" then
             tag = "Level BiS   "
@@ -335,14 +404,38 @@ function SG.Tracker.Update()
         end
         frame.coord:SetText(dist and (coord .. "    " .. dist) or coord)
         y = y + 18
+        local rows, heights, contentH = nil, nil, 0
         if step.kind == "complete" or step.kind == "run" then
-            y = ShowObjectives(frame, step, y)
+            rows, heights, contentH = ObjectiveRows(frame, step)
         elseif step.kind == "turnin" then
-            y = ShowTurnIn(frame, step, y)
+            local rewards = step.rewards or {}
+            local shown = 0
+            for i = 1, #rewards do
+                if rewards[i] and shown < 4 then shown = shown + 1 end
+            end
+            contentH = shown * 26
         end
-        local height = y + 42
-        if height < 148 then height = 148 end
+        local natural = y + contentH + 42
+        if natural < 148 then natural = 148 end
+        local maxH = 700
+        if UIParent and UIParent.GetHeight then
+            local screen = UIParent:GetHeight()
+            if type(screen) == "number" and screen > 200 then maxH = screen - 40 end
+        end
+        local height = natural
+        if height > maxH then height = maxH end
         frame:SetHeight(height)
+        local viewBottom = height - 42
+        local room = viewBottom - y
+        if room < 0 then room = 0 end
+        frame.objMax = contentH - room
+        if frame.objMax < 0 then frame.objMax = 0 end
+        if (frame.objOffset or 0) > frame.objMax then frame.objOffset = frame.objMax end
+        if rows then
+            ShowObjectives(frame, step, y, viewBottom, rows, heights)
+        elseif step.kind == "turnin" then
+            ShowTurnIn(frame, step, y)
+        end
     end
     SG.Tracker.updating = false
     if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end

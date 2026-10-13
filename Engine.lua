@@ -116,6 +116,12 @@ local function AcceptSentence(quest, where)
     return string.format("Accept %s%s%s.", quest.name, from, at)
 end
 
+local function ChainPrior(quest)
+    local prior = quest and quest.chainPrior
+    if type(prior) ~= "table" or #prior == 0 then return nil end
+    return prior
+end
+
 local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
     local match = SG.BiS.Match(quest, guide.side)
     local startMap, startX, startY, where = StartPin(quest)
@@ -161,6 +167,7 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         row.kind = kind
         row.title = title
         row.text = text
+        row.chainPrior = ChainPrior(quest)
         steps[#steps + 1] = row
     end
     add("accept", "Accept: " .. quest.name, AcceptSentence(quest, where))
@@ -480,18 +487,23 @@ local function AddDungeon(steps, def, segment)
                 choice = quest.choice,
                 level = level or quest.level,
                 match = ordered[i].match,
+                chainPrior = ChainPrior(quest),
                 title = "Accept: " .. quest.name,
                 text = text,
             })
         end
-        local runs, names = {}, {}
+        local runs, names, links = {}, {}, {}
         for i = 1, #ordered do
             local quest = ordered[i].quest
             runs[#runs + 1] = { id = quest.id, match = ordered[i].match, name = quest.name }
             names[#names + 1] = quest.name
+            local prior = ChainPrior(quest)
+            if prior then
+                links[#links + 1] = { name = quest.name, prior = prior }
+            end
         end
         local list = table.concat(names, ", ")
-        steps[#steps + 1] = Step({
+        local run = Step({
             kind = "run",
             runs = runs,
             segment = segment.title,
@@ -502,6 +514,8 @@ local function AddDungeon(steps, def, segment)
             title = "Run " .. segment.dungeon,
             text = "Finish every objective for this dungeon, then turn the quests in. " .. list .. ".",
         })
+        if #links > 0 then run.chainLinks = links end
+        steps[#steps + 1] = run
         for i = 1, #ordered do
             local quest = ordered[i].quest
             local turnMap, turnX, turnY, turnWho = TurnPin(quest)
@@ -517,6 +531,7 @@ local function AddDungeon(steps, def, segment)
                 choice = quest.choice,
                 level = level or quest.level,
                 match = ordered[i].match,
+                chainPrior = ChainPrior(quest),
                 title = "Turn in: " .. quest.name,
                 text = string.format("Turn in %s%s.", quest.name, turn),
             })

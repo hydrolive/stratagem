@@ -19,7 +19,7 @@ local STARTER = {
     A = { [4] = "a-teldrassil", [3] = "a-dunmorogh", [7] = "a-dunmorogh" },
 }
 
-local ROUTE_BLURB = "One route for your faction. It follows your level and sends you to the zone whose next quest is the better piece. The ride is not treated as a cost. It leaves a zone when another zone still has a lower quest, and it comes back when a later quest here is next. Each catalog quest brings the earlier quests in its journal chain, and those steps are finished before the dungeon. A dungeon is then every pickup, one clear, and one turn-in at a time. The level on that block is the journal difficulty, so an easier dungeon comes first. The bundled catalog still ends in the mid 30s, so this is not every side quest in a zone. A line marked (Optional) is a dungeon farm, a gear quest that was not on the written route, or the skyborne island. Mark it done to skip it."
+local ROUTE_BLURB = "One route for your faction. It follows your level and sends you to the zone whose next quest is the better piece. The ride is not treated as a cost. It leaves a zone when another zone still has a lower quest, and it comes back when a later quest here is next. Each catalog quest brings the earlier quests in its journal chain, and those steps are finished before the dungeon. A quest that continues an earlier one shows a chain marker. Mouse over it for those earlier quests. A dungeon is then every pickup, one clear, and one turn-in at a time. The level on that block is the journal difficulty, so an easier dungeon comes first. The bundled catalog still ends in the mid 30s, so this is not every side quest in a zone. A line marked (Optional) is a dungeon farm, a gear quest that was not on the written route, or the skyborne island. Mark it done to skip it."
 
 local BIS_SLOTS = {
     { id = 1, name = "Head" },
@@ -245,34 +245,179 @@ function SG.Route.StartOf(id)
     return row[7], row[8], row[9], row[6]
 end
 
+-- Same class bits the client uses. Discovery stores a mask, not a token.
+local CLASS_BITS = {
+    WARRIOR = 1, PALADIN = 2, HUNTER = 4, ROGUE = 8, PRIEST = 16,
+    SHAMAN = 64, MAGE = 128, WARLOCK = 256, DRUID = 1024,
+}
+
+-- NaowhForever_Discovery publishes CompletoQuestData. Stratagem does not
+-- copy that list. A missing addon simply leaves the extra lead-in off.
+local function DiscoveryRow(id)
+    local ns = _G.NaowhForever or _G.NaowwahForever
+    local data = ns and ns.CompletoQuestData
+    local quests = data and data.Quests
+    local row = quests and quests[id]
+    if type(row) ~= "table" then return nil end
+    return row
+end
+
+local function DiscoveryRequires()
+    local ns = _G.NaowhForever or _G.NaowwahForever
+    local data = ns and ns.CompletoQuestData
+    local requires = data and data.Requires
+    if type(requires) ~= "table" then return nil end
+    return requires
+end
+
+local function DiscoverySide(code)
+    if code == 1 then return "A" end
+    if code == 2 then return "H" end
+    if code == 3 or code == 0 or code == nil then return "B" end
+    return nil
+end
+
+local function DiscoveryAllowed(id, side)
+    local row = DiscoveryRow(id)
+    if not row then return true end
+    local questSide = DiscoverySide(row[4])
+    if questSide and questSide ~= "B" and side and questSide ~= side then return false end
+    local races = row[5]
+    if type(races) == "number" and races ~= 0 and SG.BiS.RaceOK and not SG.BiS.RaceOK({ races = races }, SG.raceID) then
+        return false
+    end
+    local mask = row[6]
+    if type(mask) == "number" and mask ~= 0 and SG.classToken then
+        local bit = CLASS_BITS[SG.classToken]
+        if bit and math.floor(mask / bit) % 2 == 0 then return false end
+    end
+    return true
+end
+
+-- Returns the scheduling level and whether it came from this quest.
+-- A level inherited from the chain root is not sourced, so a later step
+-- can be lifted to the previous quest instead of sorting at the root minimum.
 local function QuestLevelOf(journal, id, rootId, rootLevel)
-    local level
+    local level, sourced
     local known = SG.BiS.Quest(id)
     if known and known.level and known.level > 0 then
         level = known.level
+        sourced = true
     end
     if not level then
         local row = JournalQuestRow(journal, id)
-        if row and type(row[3]) == "number" and row[3] > 0 then level = row[3] end
+        if row and type(row[3]) == "number" and row[3] > 0 then
+            level = row[3]
+            sourced = true
+        end
     end
     if not level and journal and journal.QuestMinLevel and journal.QuestMinLevel[id] then
         level = journal.QuestMinLevel[id]
+        sourced = true
+    end
+    -- Discovery's quest level wins over Questie. Questie can report a minimum
+    -- that would pull The Forgotten Pools up into the level 16 visit.
+    if not level then
+        local disco = DiscoveryRow(id)
+        if disco and type(disco[2]) == "number" and disco[2] > 0 then
+            level = disco[2]
+            sourced = true
+        end
     end
     if not level then
         local QuestDB = _G.QuestDB
         if QuestDB and QuestDB.questLevel then
             local questLevel = QuestDB.questLevel(id)
-            if type(questLevel) == "number" and questLevel > 0 then level = questLevel end
+            if type(questLevel) == "number" and questLevel > 0 then
+                level = questLevel
+                sourced = true
+            end
         end
     end
     if not level and rootId and id ~= rootId and journal and journal.QuestMinLevel and journal.QuestMinLevel[rootId] then
         level = journal.QuestMinLevel[rootId]
     end
     if not level then level = rootLevel or 1 end
-    -- A listed level below the journal minimum would send the player too early.
     local min = journal and journal.QuestMinLevel and journal.QuestMinLevel[id]
-    if type(min) == "number" and min > level then level = min end
-    return level
+    if type(min) == "number" and min > level then
+        level = min
+        sourced = true
+    end
+    local disco = DiscoveryRow(id)
+    local dmin = disco and disco[3]
+    if type(dmin) == "number" and dmin > level then
+        level = dmin
+        sourced = true
+    end
+    return level, sourced
+end
+
+-- Requirements of quests already on the journal chain. This walks upward
+-- only, so a side branch that requires a chain quest is not pulled in.
+local function PrependAncestors(steps, seen)
+    local requires = DiscoveryRequires()
+    if not requires then return steps end
+    local members = {}
+    local function collect(list)
+        for i = 1, #list do
+            local step = list[i]
+            if type(step) == "number" then
+                members[#members + 1] = step
+            elseif type(step) == "table" then
+                collect(step)
+            end
+        end
+    end
+    collect(steps)
+    local member = {}
+    for i = 1, #members do member[members[i]] = true end
+    local ancestor = {}
+    local function walk(id, depth)
+        if depth > 8 then return end
+        local req = requires[id]
+        if type(req) ~= "table" then return end
+        for i = 1, #req do
+            local need = req[i]
+            if type(need) == "number" and not member[need] and not ancestor[need] then
+                local row = DiscoveryRow(need)
+                if row and type(row[1]) == "string" and row[1] ~= "" then
+                    ancestor[need] = true
+                    walk(need, depth + 1)
+                end
+            end
+        end
+    end
+    for i = 1, #members do walk(members[i], 0) end
+    local ordered, placed, visiting = {}, {}, {}
+    local function emit(id)
+        if placed[id] or not ancestor[id] or visiting[id] then return end
+        visiting[id] = true
+        local req = requires[id]
+        if type(req) == "table" then
+            for i = 1, #req do
+                if type(req[i]) == "number" then emit(req[i]) end
+            end
+        end
+        visiting[id] = nil
+        if not placed[id] then
+            placed[id] = true
+            ordered[#ordered + 1] = id
+            seen[id] = true
+        end
+    end
+    for i = 1, #members do
+        local req = requires[members[i]]
+        if type(req) == "table" then
+            for r = 1, #req do
+                if type(req[r]) == "number" then emit(req[r]) end
+            end
+        end
+    end
+    if #ordered == 0 then return steps end
+    local out = {}
+    for i = 1, #ordered do out[#out + 1] = ordered[i] end
+    for i = 1, #steps do out[#out + 1] = steps[i] end
+    return out
 end
 
 local function ChainList(journal, root)
@@ -318,7 +463,7 @@ local function ChainList(journal, root)
     -- Follow-ups live on the dungeon row (The Glowing Shard), not in QuestChains.
     if row and type(row.steps) == "table" then add(row.steps) end
     if #steps == 0 then return { root } end
-    return steps
+    return PrependAncestors(steps, seen)
 end
 
 local function ChainQuest(journal, id, level)
@@ -348,6 +493,20 @@ local function ChainQuest(journal, id, level)
     elseif giver and (not where or where == "") then
         where = giver
     end
+    local disco = DiscoveryRow(id)
+    local discoSide, discoRaces
+    if disco then
+        if (not name or name == "") and type(disco[1]) == "string" and disco[1] ~= "" then
+            name = disco[1]
+        end
+        if not map and disco[7] then map = disco[7] end
+        if not x and disco[8] then x = disco[8] end
+        if not y and disco[9] then y = disco[9] end
+        if not giver and type(disco[10]) == "string" and disco[10] ~= "" then giver = disco[10] end
+        discoSide = DiscoverySide(disco[4])
+        if type(disco[5]) == "number" and disco[5] ~= 0 then discoRaces = disco[5] end
+        if map and not hadStart then hadStart = map end
+    end
     if not name or name == "" then
         local QuestDB = _G.QuestDB
         if QuestDB and QuestDB.name then
@@ -368,6 +527,18 @@ local function ChainQuest(journal, id, level)
             where = turn[4]
         end
     end
+    if type(giver) == "string" and giver ~= "" then
+        if type(where) ~= "string" or where == "" then
+            local place = ZoneKey(map, nil)
+            if place then
+                where = place .. " - " .. giver
+            else
+                where = giver
+            end
+        elseif not where:find(giver, 1, true) then
+            where = where .. " - " .. giver
+        end
+    end
     if not name or name == "" then return nil end
     return {
         id = id,
@@ -380,8 +551,8 @@ local function ChainQuest(journal, id, level)
         y = y,
         rewards = {},
         class = row and row.class,
-        races = row and row.races,
-        side = row and row[4],
+        races = (row and row.races) or discoRaces,
+        side = (row and row[4]) or discoSide,
         inside = not hadStart and true or nil,
     }
 end
@@ -409,11 +580,12 @@ local function UnitsFrom(def, seq, seen, side)
                 return false
             end
         end
+        if not DiscoveryAllowed(id, side) then return false end
         return true
     end
     for s = 1, #segments do
         local segment = segments[s]
-        local function push(level, gear, plain, entry, dungeon, keyOverride, questLevel, leads)
+        local function push(level, gear, plain, entry, dungeon, keyOverride, questLevel, leads, chainPrior, chainRoot, chainPos)
             seq = seq + 1
             local key = keyOverride or segment.title
             if plain and plain.id then seen[plain.id] = true end
@@ -430,6 +602,9 @@ local function UnitsFrom(def, seq, seen, side)
                 entry = entry,
                 dungeon = dungeon,
                 leads = leads,
+                chainPrior = chainPrior,
+                chainRoot = chainRoot,
+                chainPos = chainPos,
                 order = seq,
             }
         end
@@ -444,20 +619,38 @@ local function UnitsFrom(def, seq, seen, side)
             end
             list[#list + 1] = quest
         end
-        local function expandOne(id, rootId, rootLevel, dungeonName)
-            if seen[id] then return end
+        local function QuestTitle(id)
+            local known = SG.BiS.Quest(id)
+            if known and type(known.name) == "string" and known.name ~= "" then return known.name end
+            local row = JournalQuestRow(journal, id)
+            if row and type(row[2]) == "string" and row[2] ~= "" then return row[2] end
+            local named = journal and journal.QuestChainNames and journal.QuestChainNames[id]
+            if type(named) == "string" and named ~= "" then return named end
+            local disco = DiscoveryRow(id)
+            if disco and type(disco[1]) == "string" and disco[1] ~= "" then return disco[1] end
+            local QuestDB = _G.QuestDB
+            if QuestDB and QuestDB.name then
+                local qname = QuestDB.name(id)
+                if type(qname) == "string" and qname ~= "" then return qname end
+            end
+            return nil
+        end
+        local function expandOne(id, rootId, rootLevel, dungeonName, chainPrior, chainPos, chainRoot, chainFloor)
+            if seen[id] then return nil end
             if not allowed(id) then
                 seen[id] = true
-                return
+                return nil
             end
-            local level = QuestLevelOf(journal, id, rootId, rootLevel)
+            local level, sourced = QuestLevelOf(journal, id, rootId, rootLevel)
+            if not sourced and chainFloor and level < chainFloor then level = chainFloor end
             local rowLevel = JournalRowLevel(journal, id)
             local questLevel = rowLevel or level
+            if questLevel < level then questLevel = level end
             local follow = FollowUpDungeon(journal, id)
             if follow then
                 seen[id] = true
                 rememberAfter(id, follow, questLevel)
-                return
+                return nil
             end
             local known = SG.BiS.Quest(id)
             local dungeon = nil
@@ -476,17 +669,22 @@ local function UnitsFrom(def, seq, seen, side)
             end
             -- A dungeon quest stays with that dungeon even when the zone
             -- guide listed the root under Silverpine or another segment.
+            -- Lead-ins keep their start map, so the dungeon bracket stays put.
             if dungeon and dungeon ~= "" then key = dungeon end
+            local prior = (chainRoot and chainPrior) or nil
+            local root = chainRoot
+            local pos = chainRoot and chainPos or nil
             if known then
-                push(known.level or level, ClassGear(known), nil, id, dungeon, key, questLevel, leads)
-                return
+                push(level, ClassGear(known), nil, id, dungeon, key, questLevel, leads, prior, root, pos)
+                return level
             end
             local quest = ChainQuest(journal, id, questLevel)
             if not quest then
                 seen[id] = true
-                return
+                return nil
             end
-            push(quest.level or level, 99, nil, quest, dungeon, key, questLevel, leads)
+            push(quest.level or level, 99, nil, quest, dungeon, key, questLevel, leads, prior, root, pos)
+            return quest.level or level
         end
         local function expand(rootId, dungeonName)
             -- A hand-off is recorded when its parent chain is walked, in that
@@ -499,6 +697,48 @@ local function UnitsFrom(def, seq, seen, side)
             end
             local rootLevel = QuestLevelOf(journal, rootId, nil, nil)
             local chain = ChainList(journal, rootId)
+            local priorOf, posOf = {}, {}
+            local namesBefore = {}
+            local pos, count = 0, 0
+            local function copyPrior(list)
+                if #list == 0 then return nil end
+                local out = {}
+                for i = 1, #list do out[i] = list[i] end
+                return out
+            end
+            for i = 1, #chain do
+                local step = chain[i]
+                if type(step) == "table" then
+                    local prior = copyPrior(namesBefore)
+                    pos = pos + 1
+                    for n = 1, #step do
+                        local id = step[n]
+                        if type(id) == "number" then
+                            count = count + 1
+                            posOf[id] = pos
+                            priorOf[id] = prior
+                        end
+                    end
+                    for n = 1, #step do
+                        if type(step[n]) == "number" then
+                            local title = QuestTitle(step[n])
+                            if title then namesBefore[#namesBefore + 1] = title end
+                        end
+                    end
+                elseif type(step) == "number" then
+                    count = count + 1
+                    pos = pos + 1
+                    posOf[step] = pos
+                    priorOf[step] = copyPrior(namesBefore)
+                    local title = QuestTitle(step)
+                    if title then namesBefore[#namesBefore + 1] = title end
+                end
+            end
+            local chainRoot = count > 1 and rootId or nil
+            local floorLevel = nil
+            local function take(id, chainFloor)
+                return expandOne(id, rootId, rootLevel, dungeonName, priorOf[id], posOf[id], chainRoot, chainFloor)
+            end
             for i = 1, #chain do
                 local step = chain[i]
                 if type(step) == "table" then
@@ -507,12 +747,16 @@ local function UnitsFrom(def, seq, seen, side)
                         if seen[step[n]] then any = true end
                     end
                     if not any then
+                        local nextFloor = floorLevel
                         for n = 1, #step do
-                            expandOne(step[n], rootId, rootLevel, dungeonName)
+                            local raised = take(step[n], floorLevel)
+                            if raised and (not nextFloor or raised > nextFloor) then nextFloor = raised end
                         end
+                        floorLevel = nextFloor
                     end
                 else
-                    expandOne(step, rootId, rootLevel, dungeonName)
+                    local raised = take(step, floorLevel)
+                    if raised then floorLevel = raised end
                 end
             end
         end
@@ -602,6 +846,9 @@ local function Visit(batch, seen)
             local quest = CopyQuest(unit.entry, unit.level)
             if quest then
                 if unit.leads and not unit.dungeon then quest.leadIn = true end
+                if type(unit.chainPrior) == "table" and #unit.chainPrior > 0 then
+                    quest.chainPrior = unit.chainPrior
+                end
                 quests[#quests + 1] = quest
             end
         end
@@ -770,11 +1017,83 @@ function SG.Route.Leveling(side)
     local unused = {}
     for i = 1, #pool do unused[i] = pool[i] end
     local seen = {}
+    -- A later chain step stays out of the picker until the earlier one has
+    -- been placed. A dungeon quest is not held, so the clear still forms.
+    local function ChainWaiting(unit, cap, key)
+        if not unit or not unit.chainRoot or not unit.chainPos or unit.dungeon then return false end
+        for i = 1, #unused do
+            local prev = unused[i]
+            if prev and prev.chainRoot == unit.chainRoot and prev.chainPos and prev.chainPos < unit.chainPos and not prev.dungeon then
+                local alongside = key and prev.key == key and cap and prev.level <= cap
+                if not alongside then return true end
+            end
+        end
+        return false
+    end
+    local function Take(unit)
+        for i = 1, #unused do
+            if unused[i] == unit then unused[i] = false end
+        end
+    end
+    -- Keep a same-level chain tail together when the next step starts in
+    -- another zone. A higher step waits for the level weaver.
+    local function EmitChainTail(batch)
+        local guard = 0
+        local current = batch
+        while current and guard < 24 do
+            guard = guard + 1
+            local nxt, fromLevel
+            for b = 1, #current do
+                local unit = current[b]
+                if unit.chainRoot and unit.chainPos and unit.leads and not unit.dungeon then
+                    for i = 1, #unused do
+                        local cand = unused[i]
+                        if cand and cand.leads and not cand.dungeon and cand.chainRoot == unit.chainRoot and cand.chainPos == unit.chainPos + 1 then
+                            if cand.level <= unit.level and (not nxt or cand.chainPos < nxt.chainPos) then
+                                nxt = cand
+                                fromLevel = unit.level
+                            end
+                        end
+                    end
+                end
+            end
+            if not nxt then return end
+            local run = {}
+            local key = nxt.key
+            local pos = nxt.chainPos
+            local levelCap = fromLevel
+            while nxt and nxt.key == key and nxt.chainPos == pos and nxt.level <= levelCap do
+                run[#run + 1] = nxt
+                Take(nxt)
+                levelCap = nxt.level
+                pos = pos + 1
+                nxt = nil
+                for i = 1, #unused do
+                    local cand = unused[i]
+                    if cand and cand.leads and not cand.dungeon and cand.chainRoot == run[1].chainRoot and cand.chainPos == pos and cand.key == key then
+                        nxt = cand
+                    end
+                end
+            end
+            if #run == 0 then return end
+            segments[#segments + 1] = Visit(run, seen)
+            seen[key] = true
+            current = run
+        end
+    end
     while true do
         local anchor
         for i = 1, #unused do
             local unit = unused[i]
-            if unit and (not anchor or Better(unit, anchor)) then anchor = unit end
+            if unit and not ChainWaiting(unit) and (not anchor or Better(unit, anchor)) then
+                anchor = unit
+            end
+        end
+        if not anchor then
+            for i = 1, #unused do
+                local unit = unused[i]
+                if unit and (not anchor or Better(unit, anchor)) then anchor = unit end
+            end
         end
         if not anchor then break end
         -- Do not take a higher quest in this zone while another zone still
@@ -782,7 +1101,7 @@ function SG.Route.Leveling(side)
         local other
         for i = 1, #unused do
             local unit = unused[i]
-            if unit and unit.key ~= anchor.key and (not other or Better(unit, other)) then
+            if unit and unit.key ~= anchor.key and not ChainWaiting(unit) and (not other or Better(unit, other)) then
                 other = unit
             end
         end
@@ -790,12 +1109,19 @@ function SG.Route.Leveling(side)
         local batch = {}
         for i = 1, #unused do
             local unit = unused[i]
-            if unit and unit.key == anchor.key and unit.level <= cap then
+            if unit and unit.key == anchor.key and unit.level <= cap and not ChainWaiting(unit, cap, anchor.key) then
                 batch[#batch + 1] = unit
                 unused[i] = false
             end
         end
+        if #batch == 0 then
+            batch[1] = anchor
+            Take(anchor)
+        end
         table.sort(batch, function(a, b)
+            if a.chainRoot and a.chainRoot == b.chainRoot and a.chainPos and b.chainPos and a.chainPos ~= b.chainPos then
+                return a.chainPos < b.chainPos
+            end
             if a.level ~= b.level then return a.level < b.level end
             local aq = a.questLevel or a.level or 0
             local bq = b.questLevel or b.level or 0
@@ -804,6 +1130,7 @@ function SG.Route.Leveling(side)
         end)
         segments[#segments + 1] = Visit(batch, seen)
         seen[anchor.key] = true
+        EmitChainTail(batch)
     end
     local alliance = side == "A"
     return {

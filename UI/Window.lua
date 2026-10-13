@@ -479,13 +479,47 @@ function SG.UI.BuildDetail(detail)
     meta:SetTextColor(SG.RGB(T.muted))
     detail.meta = meta
 
-    local blurb = SG.Widgets.Text(detail, 12)
-    blurb:SetPoint("TOPLEFT", 16, -106)
-    blurb:SetPoint("TOPRIGHT", -16, -106)
+    local scroller = CreateFrame("ScrollFrame", nil, detail)
+    scroller:SetPoint("TOPLEFT", 16, -106)
+    scroller:SetPoint("RIGHT", -16, 0)
+    scroller:SetHeight(72)
+    scroller:EnableMouse(true)
+    scroller:EnableMouseWheel(true)
+    local child = CreateFrame("Frame", nil, scroller)
+    child:SetSize(240, 72)
+    scroller:SetScrollChild(child)
+    local blurb = SG.Widgets.Text(child, 12)
+    blurb:SetPoint("TOPLEFT", 0, 0)
     blurb:SetJustifyH("LEFT")
     blurb:SetWordWrap(true)
+    blurb:SetWidth(240)
     blurb:SetHeight(72)
     detail.blurb = blurb
+    detail.blurbScroll = scroller
+    scroller:SetScript("OnMouseWheel", function(self, delta)
+        local shown = self:GetHeight()
+        local full = child:GetHeight()
+        local maxScroll = full - shown
+        if maxScroll < 0 then maxScroll = 0 end
+        local offset = self:GetVerticalScroll() - delta * 18
+        if offset < 0 then offset = 0 end
+        if offset > maxScroll then offset = maxScroll end
+        self:SetVerticalScroll(offset)
+    end)
+
+    local chain = CreateFrame("Button", nil, detail)
+    chain:SetSize(16, 16)
+    chain:SetPoint("TOPRIGHT", -16, -40)
+    local chainTex = chain:CreateTexture(nil, "ARTWORK")
+    chainTex:SetAllPoints()
+    chainTex:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")
+    chainTex:SetVertexColor(SG.RGB(T.gold))
+    chain:SetScript("OnEnter", function(self)
+        if self.step and SG.ShowChainTip then SG.ShowChainTip(self, self.step) end
+    end)
+    chain:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    chain:Hide()
+    detail.chain = chain
 
     local zone = SG.Widgets.Text(detail, 12)
     zone:SetPoint("TOPLEFT", 16, -182)
@@ -867,6 +901,23 @@ local function StepRow(parent)
     title:SetPoint("RIGHT", -8, 0)
     title:SetJustifyH("LEFT")
     row.title = title
+    local chain = CreateFrame("Button", nil, row)
+    chain:SetSize(16, 16)
+    chain:SetFrameLevel(row:GetFrameLevel() + 3)
+    chain:SetPoint("TOPRIGHT", -6, -6)
+    local chainTex = chain:CreateTexture(nil, "ARTWORK")
+    chainTex:SetAllPoints()
+    chainTex:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")
+    chainTex:SetVertexColor(SG.RGB(T.gold))
+    chain:SetScript("OnEnter", function(self)
+        local guide = SG.Engine.Get(SG.state.tab)
+        local step = guide and guide.steps[row.index]
+        if step and SG.ShowChainTip then SG.ShowChainTip(self, step) end
+    end)
+    chain:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    chain:SetScript("OnClick", function() end)
+    chain:Hide()
+    row.chain = chain
     local sub = SG.Widgets.Text(row, 11)
     sub:SetPoint("TOPLEFT", 12, -24)
     sub:SetPoint("RIGHT", -8, 0)
@@ -1128,6 +1179,11 @@ function SG.UI.RefreshSteps(resetScroll)
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y)
             row:SetSize(math.max(40, width - 16), 48)
             local prefix = row.done and "Done  " or ""
+            local chained = SG.HasChain and SG.HasChain(step)
+            row.title:ClearAllPoints()
+            row.title:SetPoint("TOPLEFT", 12, -6)
+            row.title:SetPoint("RIGHT", chained and -28 or -8, 0)
+            if chained then row.chain:Show() else row.chain:Hide() end
             row.title:SetText(prefix .. step.title)
             local bits = {}
             if step.level and (step.questID or step.kind == "farm" or step.kind == "gear" or step.kind == "run") then
@@ -1209,11 +1265,85 @@ local function ShowRewards(detail, step)
     end
 end
 
+local function LayoutDetail(detail, step)
+    local blurb = detail.blurb
+    local scroll = detail.blurbScroll
+    if not blurb or not scroll then return end
+    local chained = step and SG.HasChain and SG.HasChain(step) and true or false
+    if detail.chain then
+        detail.chain.step = chained and step or nil
+        if chained then detail.chain:Show() else detail.chain:Hide() end
+    end
+    if detail.title then
+        detail.title:ClearAllPoints()
+        detail.title:SetPoint("TOPLEFT", 16, -36)
+        detail.title:SetPoint("TOPRIGHT", chained and -36 or -16, -36)
+    end
+    local width = (detail:GetWidth() or 300) - 48
+    if width < 80 then width = 240 end
+    blurb:SetWidth(width)
+    -- Tall enough to measure a dungeon clear. The region is shrunk to the text after.
+    blurb:SetHeight(4000)
+    local textH = blurb:GetStringHeight() or 0
+    if textH < 1 then
+        local text = blurb:GetText() or ""
+        local lines = 1
+        for _ in text:gmatch("\n") do lines = lines + 1 end
+        textH = lines * 16
+    end
+    blurb:SetHeight(textH + 4)
+    local child = scroll:GetScrollChild()
+    if child then
+        child:SetWidth(width)
+        child:SetHeight(textH + 4)
+    end
+    local frameH = detail:GetHeight()
+    if not frameH or frameH < 400 then frameH = 640 end
+    local maxView = frameH - 106 - 12 - 330
+    if maxView < 72 then maxView = 72 end
+    local view = textH + 8
+    if view < 72 then view = 72 end
+    if view > maxView then view = maxView end
+    local same = detail.blurbStep == step
+    detail.blurbStep = step
+    local kept = same and scroll:GetVerticalScroll() or 0
+    scroll:SetHeight(view)
+    local maxScroll = (textH + 4) - view
+    if maxScroll < 0 then maxScroll = 0 end
+    if kept < 0 then kept = 0 end
+    if kept > maxScroll then kept = maxScroll end
+    scroll:SetVerticalScroll(kept)
+    local top = -(106 + view + 4)
+    local function move(widget, dy, both)
+        if not widget then return end
+        widget:ClearAllPoints()
+        widget:SetPoint("TOPLEFT", 16, top - dy)
+        if both then widget:SetPoint("TOPRIGHT", -16, top - dy) end
+    end
+    move(detail.zone, 0, true)
+    move(detail.hidden, 18, true)
+    move(detail.bar, 40, true)
+    move(detail.percent, 52, false)
+    move(detail.primary, 76, true)
+    move(detail.secondary, 116, true)
+    move(detail.tertiary, 150, true)
+    move(detail.reset, 186, false)
+    local items = detail.items or {}
+    for i = 1, #items do
+        local row = items[i]
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 16, top - 214 - (i - 1) * 26)
+        row:SetPoint("RIGHT", -16, 0)
+    end
+    if detail.bar and detail.bar.SetPercent then
+        detail.bar:SetPercent(detail.bar.percent, detail.bar.done)
+    end
+end
+
 function SG.UI.RefreshDetail()
     local detail = SG.UI.detail
     local guide = SG.Engine.Get(SG.db.selected) or SG.Engine.Get(SG.state.tab)
     if SG.db.category == "options" then
-        detail.blurb:SetHeight(72)
         detail.eyebrow:SetText("OPTIONS")
         detail.title:SetText("Stratagem")
         detail.meta:SetText(SG.Specs.Label(SG.Specs.Selected()))
@@ -1228,11 +1358,11 @@ function SG.UI.RefreshDetail()
         detail.reset:Hide()
         detail.star:Hide()
         ShowRewards(detail, nil)
+        LayoutDetail(detail, nil)
         return
     end
     detail.star:Show()
     if not guide then
-        detail.blurb:SetHeight(72)
         detail.eyebrow:SetText("STRATAGEM")
         detail.title:SetText("Pick a guide")
         detail.meta:SetText("BiS before speed")
@@ -1246,6 +1376,7 @@ function SG.UI.RefreshDetail()
         detail.tertiary:Hide()
         detail.reset:Hide()
         ShowRewards(detail, nil)
+        LayoutDetail(detail, nil)
         return
     end
     local done, total = SG.Engine.Stats(guide)
@@ -1291,9 +1422,6 @@ function SG.UI.RefreshDetail()
         if (step.kind == "complete" or step.kind == "run") and SG.QuestProgressText then
             local extra = SG.QuestProgressText(step)
             if extra and extra ~= "" then blurb = blurb .. "\n" .. extra end
-            detail.blurb:SetHeight(110)
-        else
-            detail.blurb:SetHeight(72)
         end
         detail.blurb:SetText(blurb)
         local dist = SG.Nav.FormatDistance(SG.Nav.Measure(step))
@@ -1327,11 +1455,11 @@ function SG.UI.RefreshDetail()
         detail.tertiary:SetLabel("Next step")
         detail.tertiary:SetScript("OnClick", function() SG.Engine.Nudge(1) end)
         ShowRewards(detail, step)
+        LayoutDetail(detail, step)
     else
         detail.eyebrow:SetText(guide.group or "GUIDE")
         detail.title:SetText(guide.title)
         detail.meta:SetText(string.format("%d-%d    %s", guide.min or 1, guide.max or 60, SG.SideName(guide.side)))
-        detail.blurb:SetHeight(72)
         detail.blurb:SetText(guide.blurb or "")
         local zones = SG.Engine.ZoneLine(guide)
         detail.zone:SetText(string.format("%d steps  ·  %s", total, zones))
@@ -1355,6 +1483,7 @@ function SG.UI.RefreshDetail()
         detail.tertiary:SetScript("OnClick", function() SG.UI.OpenTab(guide.id) end)
         local nextStep = index and guide.steps[index] or nil
         ShowRewards(detail, nextStep)
+        LayoutDetail(detail, nil)
     end
     detail.primary:Paint(false)
 end
