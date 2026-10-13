@@ -9,9 +9,8 @@ end
 
 SG.Route = SG.Route or {}
 
--- Stay in a zone long enough to finish the quests that opened with this visit,
--- then leave when another zone's quest is the next one by level.
-local BAND = 3
+-- Stay in a zone for quests that are not past the next quest in another zone.
+-- A higher quest here waits, and the route comes back for it.
 
 -- Race ids: human 1, orc 2, dwarf 3, night elf 4, undead 5, tauren 6, gnome 7, troll 8.
 -- Humans have no starter writeup in this addon, so their route begins at the first catalog quest.
@@ -20,7 +19,7 @@ local STARTER = {
     A = { [4] = "a-teldrassil", [3] = "a-dunmorogh", [7] = "a-dunmorogh" },
 }
 
-local ROUTE_BLURB = "One route for your faction. It follows your level and sends you to the zone whose next quest is the better piece. The ride is not treated as a cost, so the route leaves a zone and comes back when a later quest there is the next upgrade. Each catalog quest brings the earlier quests in its journal chain, and those steps are finished before the dungeon. A dungeon is then every pickup, one clear, and one turn-in at a time. The level on that block is the journal difficulty, so an easier dungeon comes first. The bundled catalog still ends in the mid 30s, so this is not every side quest in a zone. A line marked (Optional) is a dungeon farm, a gear quest that was not on the written route, or the skyborne island. Mark it done to skip it."
+local ROUTE_BLURB = "One route for your faction. It follows your level and sends you to the zone whose next quest is the better piece. The ride is not treated as a cost. It leaves a zone when another zone still has a lower quest, and it comes back when a later quest here is next. Each catalog quest brings the earlier quests in its journal chain, and those steps are finished before the dungeon. A dungeon is then every pickup, one clear, and one turn-in at a time. The level on that block is the journal difficulty, so an easier dungeon comes first. The bundled catalog still ends in the mid 30s, so this is not every side quest in a zone. A line marked (Optional) is a dungeon farm, a gear quest that was not on the written route, or the skyborne island. Mark it done to skip it."
 
 local BIS_SLOTS = {
     { id = 1, name = "Head" },
@@ -474,8 +473,10 @@ local function UnitsFrom(def, seq, seen, side)
             if id ~= rootId then
                 local probe = ChainQuest(journal, id, level)
                 key = ZoneKey(probe and probe.map, segment.title)
-                if dungeon and dungeon ~= "" then key = dungeon end
             end
+            -- A dungeon quest stays with that dungeon even when the zone
+            -- guide listed the root under Silverpine or another segment.
+            if dungeon and dungeon ~= "" then key = dungeon end
             if known then
                 push(known.level or level, ClassGear(known), nil, id, dungeon, key, questLevel, leads)
                 return
@@ -617,9 +618,13 @@ local function Visit(batch, seen)
         end
     end
     local arrive = first.arrive
+    -- The segment that owns this group carries the arrival line. A dungeon
+    -- quest that was listed on another segment must not rename the block.
+    local zone = key
     for i = 1, #batch do
         if batch[i].arrive and batch[i].arrive.text then
             arrive = batch[i].arrive
+            if batch[i].zone then zone = batch[i].zone end
             break
         end
     end
@@ -630,7 +635,7 @@ local function Visit(batch, seen)
     return {
         title = key,
         travel = key,
-        zone = first.zone or key,
+        zone = zone,
         dungeon = dungeon,
         level = first.level,
         after = after,
@@ -772,7 +777,16 @@ function SG.Route.Leveling(side)
             if unit and (not anchor or Better(unit, anchor)) then anchor = unit end
         end
         if not anchor then break end
-        local cap = anchor.level + BAND
+        -- Do not take a higher quest in this zone while another zone still
+        -- has something at a lower level. Same-level quests here stay together.
+        local other
+        for i = 1, #unused do
+            local unit = unused[i]
+            if unit and unit.key ~= anchor.key and (not other or Better(unit, other)) then
+                other = unit
+            end
+        end
+        local cap = other and other.level or 1000
         local batch = {}
         for i = 1, #unused do
             local unit = unused[i]

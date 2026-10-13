@@ -82,11 +82,43 @@ local function TurnPin(quest)
     return map, x, y, who
 end
 
+-- The journal names the town when it starts on the same map as the catalog
+-- pin (Brill, the Sepulcher). A different map keeps the catalog place, so
+-- A Frightened Request stays in Silverpine Forest instead of moving to Undercity.
+local function AcceptWhere(quest, where)
+    if not (quest and quest.id and quest.map and SG.Route and SG.Route.StartOf) then
+        return where
+    end
+    local jmap, _, _, jwhere = SG.Route.StartOf(quest.id)
+    if jmap and jmap == quest.map and type(jwhere) == "string" and jwhere:find(" - ", 1, true) then
+        return jwhere
+    end
+    return where
+end
+
+local function PlaceName(where)
+    if type(where) ~= "string" or where == "" or where:find("not known yet", 1, true) then
+        return nil
+    end
+    local place = where:match("^(.-) %- ")
+    if not place then return nil end
+    place = strtrim(place)
+    if place == "" then return nil end
+    return place
+end
+
+local function AcceptSentence(quest, where)
+    where = AcceptWhere(quest, where)
+    local giver = SG.Engine.Giver(where)
+    local place = PlaceName(where)
+    local from = giver and (" from " .. giver) or ""
+    local at = place and (" in " .. place) or ""
+    return string.format("Accept %s%s%s.", quest.name, from, at)
+end
+
 local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
     local match = SG.BiS.Match(quest, guide.side)
     local startMap, startX, startY, where = StartPin(quest)
-    local giver = SG.Engine.Giver(where)
-    local from = giver and (" from " .. giver) or ""
     local place = quest.zone or segment.zone or segment.title
     if gaps and prevLevel and quest.level and (quest.level - prevLevel) >= 4 then
         steps[#steps + 1] = Step({
@@ -131,8 +163,7 @@ local function AddQuest(steps, guide, segment, quest, prevLevel, gaps)
         row.text = text
         steps[#steps + 1] = row
     end
-    add("accept", "Accept: " .. quest.name,
-        string.format("Accept %s%s.", quest.name, from))
+    add("accept", "Accept: " .. quest.name, AcceptSentence(quest, where))
     add("complete", "Complete: " .. quest.name,
         string.format("Finish the objectives for %s.", quest.name))
     local turnMap, turnX, turnY, turnWho = TurnPin(quest)
@@ -436,9 +467,7 @@ local function AddDungeon(steps, def, segment)
                     text = string.format("Accept %s. It starts inside %s.", quest.name, segment.dungeon)
                 end
             else
-                local giver = SG.Engine.Giver(where)
-                local from = giver and (" from " .. giver) or ""
-                text = string.format("Accept %s%s.", quest.name, from)
+                text = AcceptSentence(quest, where)
             end
             steps[#steps + 1] = Step({
                 kind = "accept",
