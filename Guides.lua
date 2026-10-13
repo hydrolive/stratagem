@@ -299,7 +299,7 @@ SG.GuideData = {
         blurb = "Ragefire Chasm plus the Undercity turn-ins that reward a BiS piece. Do the chasm once you are welcome in Orgrimmar.",
         segments = {
             Segment("Ragefire Chasm", "Orgrimmar", 1454, 49.6, 50.4,
-                "Pick up the Orgrimmar and Undercity quests, then clear Ragefire Chasm once.",
+                "Hidden Enemies in Orgrimmar comes first. Then pick up the Ragefire quests, clear the chasm once, and turn in the Hidden Enemies steps that open after that run.",
                 { 5730, 5725, 5724 }),
             Segment("Ruins of Lordaeron", "Undercity", 1458, 57.8, 89.8,
                 "Accept A Frightened Request in the Sepulcher, The Wrath of Rath'mael in Brill, and Light's Justice in the Undercity before you clear the ruins.",

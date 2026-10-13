@@ -109,6 +109,7 @@ local MAP_ZONE = {
     [1440] = "Ashenvale",
     [1441] = "Thousand Needles",
     [1442] = "Stonetalon Mountains",
+    [1454] = "Orgrimmar",
     [1456] = "Thunder Bluff",
     [1458] = "Undercity",
     [2521] = "Zephras Isle",
@@ -181,6 +182,23 @@ local function ContainsId(step, id)
         if ContainsId(step[i], id) then return true end
     end
     return false
+end
+
+-- The block this quest is listed in, when it is one of that dungeon's own
+-- quests. A follow-up that only appears under another row's steps is not.
+local function DungeonPrimary(journal, id)
+    if not journal or type(journal.QuestData) ~= "table" or not id then return nil end
+    for d = 1, #journal.QuestData do
+        local block = journal.QuestData[d]
+        local list = type(block) == "table" and block.quests or nil
+        if type(list) == "table" and type(block.name) == "string" then
+            for q = 1, #list do
+                local row = list[q]
+                if type(row) == "table" and row[1] == id then return block.name end
+            end
+        end
+    end
+    return nil
 end
 
 -- A quest that only appears in another quest's follow-up list is done after
@@ -302,6 +320,32 @@ local function DiscoveryRequires()
     local requires = data and data.Requires
     if type(requires) ~= "table" then return nil end
     return requires
+end
+
+-- A later Hidden Enemies step requires the quest you finish inside Ragefire.
+-- That step is a turn-in after the clear. The in-dungeon quest itself is not.
+local function AfterDungeon(journal, id)
+    if DungeonPrimary(journal, id) then return nil end
+    local requires = DiscoveryRequires()
+    if not requires then return nil end
+    local seen = {}
+    local function walk(cur, depth)
+        if depth > 8 or seen[cur] then return nil end
+        seen[cur] = true
+        local req = requires[cur]
+        if type(req) ~= "table" then return nil end
+        for i = 1, #req do
+            local need = req[i]
+            if type(need) == "number" then
+                local block = DungeonPrimary(journal, need)
+                if block then return block end
+                local found = walk(need, depth + 1)
+                if found then return found end
+            end
+        end
+        return nil
+    end
+    return walk(id, 0)
 end
 
 local function DiscoverySide(code)
@@ -669,7 +713,7 @@ local function UnitsFrom(def, seq, seen, side)
             end
             return nil
         end
-        local function expandOne(id, rootId, rootLevel, dungeonName, chainPrior, chainPos, chainRoot, chainFloor)
+        local function expandOne(id, rootId, rootLevel, dungeonName, chainPrior, chainPos, chainRoot, chainFloor, afterDungeon)
             if seen[id] then return nil end
             if not allowed(id) then
                 seen[id] = true
@@ -680,7 +724,14 @@ local function UnitsFrom(def, seq, seen, side)
             local rowLevel = JournalRowLevel(journal, id)
             local questLevel = rowLevel or level
             if questLevel < level then questLevel = level end
+            local home = DungeonPrimary(journal, id)
             local follow = FollowUpDungeon(journal, id)
+            -- The journal row level of an in-dungeon quest is not when to go.
+            -- Steps that require that quest, or that sit after it in the chain,
+            -- are turned in once the clear is done.
+            if not follow and not home then
+                follow = afterDungeon or AfterDungeon(journal, id)
+            end
             if follow then
                 seen[id] = true
                 rememberAfter(id, follow, questLevel)
@@ -690,6 +741,7 @@ local function UnitsFrom(def, seq, seen, side)
             local dungeon = nil
             if id == rootId then dungeon = (known and known.dungeon) or dungeonName end
             if known and known.dungeon then dungeon = known.dungeon end
+            if home then dungeon = home end
             local rootKnown = rootId and SG.BiS.Quest(rootId)
             local rootDungeon = dungeonName or (rootKnown and rootKnown.dungeon)
             local leads = nil
@@ -770,8 +822,19 @@ local function UnitsFrom(def, seq, seen, side)
             end
             local chainRoot = count > 1 and rootId or nil
             local floorLevel = nil
+            -- Once this chain has passed the dungeon's own quest, later steps
+            -- wait until that clear is done. An earlier step stays a lead-in.
+            local passedDungeon = nil
             local function take(id, chainFloor)
-                return expandOne(id, rootId, rootLevel, dungeonName, priorOf[id], posOf[id], chainRoot, chainFloor)
+                local home = nil
+                if dungeonName then
+                    local block = DungeonPrimary(journal, id)
+                    if block == dungeonName then home = block end
+                end
+                local after = (not home) and passedDungeon or nil
+                local raised = expandOne(id, rootId, rootLevel, dungeonName, priorOf[id], posOf[id], chainRoot, chainFloor, after)
+                if home then passedDungeon = home end
+                return raised
             end
             for i = 1, #chain do
                 local step = chain[i]
