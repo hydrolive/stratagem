@@ -77,8 +77,10 @@ function SG.UI.OpenInPlace(id)
     SG.char.active = id
     SG.RememberRecent(id)
     local guide = SG.Engine.Get(id)
-    SG.state.stepIndex = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)
+    if guide then SG.Engine.CatchUp(guide, true) end
+    SG.state.stepIndex = guide and SG.Engine.ShownIndex(guide) or nil
     SG.UI.Refresh(true)
+    if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
 end
 
 function SG.UI.OpenTab(id, refresh)
@@ -97,8 +99,10 @@ function SG.UI.OpenTab(id, refresh)
     SG.char.active = id
     SG.RememberRecent(id)
     local guide = SG.Engine.Get(id)
-    SG.state.stepIndex = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)
+    if guide then SG.Engine.CatchUp(guide, true) end
+    SG.state.stepIndex = guide and SG.Engine.ShownIndex(guide) or nil
     if refresh ~= false then SG.UI.Refresh(true) end
+    if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
 end
 
 function SG.UI.CloseTab(id)
@@ -113,10 +117,15 @@ end
 function SG.UI.Continue(id)
     local guide = SG.Engine.Get(id)
     if not guide then return end
+    -- OpenTab catches the character up, then the waypoint follows that step.
     SG.UI.OpenTab(id, false)
-    local index = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)
+    local index = SG.Engine.ShownIndex(guide)
     SG.state.stepIndex = index
-    if index then SG.Engine.Focus(guide, index, true) end
+    if index then
+        SG.Engine.Focus(guide, index, true)
+    elseif SG.Nav then
+        SG.Nav.Set(nil)
+    end
     SG.UI.Refresh(true)
     if SG.Tracker.Update then SG.Tracker.Update() end
 end
@@ -921,7 +930,9 @@ function SG.UI.RefreshTabs()
                 SG.db.selected = id
                 SG.char.active = id
                 local guide = SG.Engine.Get(id)
-                SG.state.stepIndex = SG.state.stepIndex or (guide and SG.Engine.CurrentIndex(guide))
+                if guide then SG.Engine.CatchUp(guide, false) end
+                SG.state.stepIndex = guide and SG.Engine.ShownIndex(guide) or nil
+                if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
             end
             SG.UI.Refresh(true)
         end)
@@ -1055,7 +1066,7 @@ function SG.UI.RefreshSteps(resetScroll)
         return
     end
     if not SG.state.stepIndex or not guide.steps[SG.state.stepIndex] or not guide.steps[SG.state.stepIndex].visible then
-        SG.state.stepIndex = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
+        SG.state.stepIndex = SG.Engine.ShownIndex(guide)
     end
     local y = 4
     local last = nil
@@ -1196,7 +1207,7 @@ function SG.UI.RefreshDetail()
     if stepMode then
         step = SG.state.stepIndex and guide.steps[SG.state.stepIndex] or nil
         if not step or not step.visible then
-            local index = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
+            local index = SG.Engine.ShownIndex(guide)
             step = index and guide.steps[index] or nil
             SG.state.stepIndex = index
         end

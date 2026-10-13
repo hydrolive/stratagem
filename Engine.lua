@@ -602,30 +602,92 @@ local function AutoDone(step, completed, inLog, objectives)
     return false
 end
 
-function SG.Engine.SyncAll()
-    local guides = SG.Engine.guides or {}
-    for g = 1, #guides do
-        local guide = guides[g]
-        local cache = {}
-        for i = 1, #guide.steps do
-            local step = guide.steps[i]
-            if step.visible and step.questID and not step.optional then
-                local row = SG.Engine.Progress(guide.id)
-                -- Prev cleared this step on purpose. Leave it until Next or Done.
-                if not (row.hold and row.hold == i) then
-                    local state = cache[step.questID]
-                    if not state then
-                        local completed, inLog, objectives = SG.QuestState(step.questID)
-                        state = { completed, inLog, objectives }
-                        cache[step.questID] = state
-                    end
-                    if AutoDone(step, state[1], state[2], state[3]) then
-                        SG.Engine.Mark(guide, i, true)
-                    end
+function SG.Engine.SyncGuide(guide)
+    if not guide then return 0 end
+    local cache = {}
+    local marked = 0
+    local row = SG.Engine.Progress(guide.id)
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if step.visible and step.questID and not step.optional then
+            -- Prev cleared this step on purpose. Leave it until Next or Done.
+            if not (row.hold and row.hold == i) and not row.done[i] then
+                local state = cache[step.questID]
+                if not state then
+                    local completed, inLog, objectives = SG.QuestState(step.questID)
+                    state = { completed, inLog, objectives }
+                    cache[step.questID] = state
+                end
+                if AutoDone(step, state[1], state[2], state[3]) then
+                    SG.Engine.Mark(guide, i, true)
+                    marked = marked + 1
                 end
             end
         end
     end
+    return marked
+end
+
+function SG.Engine.SyncAll(cacheReady)
+    if not cacheReady and SG.RefreshQuestCache then SG.RefreshQuestCache() end
+    local guides = SG.Engine.guides or {}
+    for g = 1, #guides do
+        SG.Engine.SyncGuide(guides[g])
+    end
+end
+
+-- Finished quests, and quests already in the log, are not offered again.
+-- Travel before the first open step is skipped only when this character
+-- has already completed something on the route.
+function SG.Engine.PlaceCursor(guide)
+    if not guide then return end
+    local row = SG.Engine.Progress(guide.id)
+    local progressed = false
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if step.questID and row.done[i] then
+            progressed = true
+            break
+        end
+    end
+    local first = SG.Engine.CurrentIndex(guide)
+    if progressed then
+        local limit = first and (first - 1) or #guide.steps
+        for i = 1, limit do
+            local step = guide.steps[i]
+            if step.visible and not (row.hold and row.hold == i) then
+                SG.Engine.Mark(guide, i, true)
+            end
+        end
+    end
+    if row.hold then return end
+    local cursor = row.cursor
+    local step = cursor and guide.steps[cursor]
+    if not step or not step.visible or SG.Engine.IsDone(guide, cursor) then
+        row.cursor = first
+    end
+end
+
+function SG.Engine.CatchUp(guide, fromSelection)
+    if not guide then return 0 end
+    if SG.RefreshQuestCache then SG.RefreshQuestCache() end
+    local row = SG.Engine.Progress(guide.id)
+    local before = row.cursor
+    if fromSelection then row.hold = nil end
+    local marked = SG.Engine.SyncGuide(guide)
+    SG.Engine.PlaceCursor(guide)
+    if fromSelection and SG.Print and (marked > 0 or before ~= row.cursor) then
+        local stop = row.cursor or (#guide.steps + 1)
+        local skipped = 0
+        for i = 1, stop - 1 do
+            local step = guide.steps[i]
+            if step.visible and row.done[i] then skipped = skipped + 1 end
+        end
+        if skipped > 0 then
+            SG.Print(string.format("Skipped %d steps already finished on this character.", skipped))
+        end
+    end
+    return marked
 end
 
 local questPending = false
@@ -636,13 +698,18 @@ function SG.Engine.OnQuestUpdate()
         questPending = false
         if not SG.db then return end
         local active = SG.Engine.Get(SG.char.active)
-        local before = active and SG.Engine.CurrentIndex(active) or nil
-        if SG.db.options.autoAdvance then SG.Engine.SyncAll() end
-        local after = active and SG.Engine.CurrentIndex(active) or nil
+        local before = active and SG.Engine.ShownIndex(active) or nil
+        if SG.RefreshQuestCache then SG.RefreshQuestCache() end
+        if SG.db.options.autoAdvance then
+            SG.Engine.SyncAll(true)
+        elseif active then
+            SG.Engine.SyncGuide(active)
+        end
+        if active then SG.Engine.PlaceCursor(active) end
+        local after = active and SG.Engine.ShownIndex(active) or nil
         if active and before ~= after and SG.Nav and SG.Nav.following then
             local row = SG.Engine.Progress(active.id)
-            if not row.hold and (not row.cursor or row.cursor == before) then
-                row.cursor = after
+            if not row.hold then
                 local step = after and active.steps[after] or nil
                 if step then SG.Nav.Set(step) end
             end

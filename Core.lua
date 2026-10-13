@@ -145,7 +145,53 @@ function SG.ItemColor(quality)
     return 0.9, 0.9, 0.9
 end
 
+-- One snapshot of turned-in quests and the current log, so a guide can
+-- skip work this character already did. Single-id APIs miss that history
+-- until the client has cached each quest.
+function SG.RefreshQuestCache()
+    local done, inLog, ready = {}, {}, {}
+    if GetQuestsCompleted then
+        local map = GetQuestsCompleted()
+        if type(map) == "table" then
+            for questID, flagged in pairs(map) do
+                if flagged then done[questID] = true end
+            end
+        end
+    end
+    if C_QuestLog and C_QuestLog.GetAllCompletedQuestIDs then
+        local ids = C_QuestLog.GetAllCompletedQuestIDs()
+        if type(ids) == "table" then
+            for i = 1, #ids do done[ids[i]] = true end
+        end
+    end
+    if C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetInfo then
+        local count = C_QuestLog.GetNumQuestLogEntries()
+        for i = 1, count do
+            local info = C_QuestLog.GetInfo(i)
+            if info and not info.isHeader and info.questID and info.questID > 0 then
+                inLog[info.questID] = true
+                -- true or 1 means the objectives are done. -1 is a failed quest.
+                if info.isComplete == true or info.isComplete == 1 then
+                    ready[info.questID] = true
+                end
+            end
+        end
+    elseif GetNumQuestLogEntries and GetQuestLogTitle then
+        local count = GetNumQuestLogEntries()
+        for i = 1, count do
+            local _, _, _, isHeader, _, isComplete, _, questID = GetQuestLogTitle(i)
+            if not isHeader and questID and questID > 0 then
+                inLog[questID] = true
+                if isComplete == 1 or isComplete == true then ready[questID] = true end
+            end
+        end
+    end
+    SG.questCache = { done = done, inLog = inLog, ready = ready }
+end
+
 local function QuestFlagged(questID)
+    local cache = SG.questCache
+    if cache and cache.done[questID] then return true end
     if C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted then
         return C_QuestLog.IsQuestFlaggedCompleted(questID) and true or false
     end
@@ -156,6 +202,8 @@ local function QuestFlagged(questID)
 end
 
 local function QuestInLog(questID)
+    local cache = SG.questCache
+    if cache and cache.inLog[questID] then return true end
     if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
         local index = C_QuestLog.GetLogIndexForQuestID(questID)
         return index and index > 0
@@ -168,6 +216,8 @@ local function QuestInLog(questID)
 end
 
 local function QuestObjectivesDone(questID)
+    local cache = SG.questCache
+    if cache and (cache.ready[questID] or cache.done[questID]) then return true end
     if C_QuestLog and C_QuestLog.IsComplete then
         return C_QuestLog.IsComplete(questID) and true or false
     end
@@ -210,8 +260,13 @@ function SG.OnLogin()
     SG.Specs.Detect()
     SG.BiS.Refresh()
     SG.Engine.Rebuild()
+    SG.RefreshQuestCache()
     if SG.db.options.autoAdvance then
-        SG.Engine.SyncAll()
+        SG.Engine.SyncAll(true)
+    end
+    local active = SG.char.active and SG.Engine.Get(SG.char.active)
+    if active then
+        SG.Engine.CatchUp(active, false)
     end
     SG.UI.Create()
     SG.Minimap.Create()
@@ -298,7 +353,11 @@ local function Slash(msg)
                 SG.Print("Progress cleared for the current guide.")
             end
         end
-        if SG.db.options.autoAdvance then SG.Engine.SyncAll() end
+        if SG.db.options.autoAdvance then
+            SG.Engine.SyncAll()
+            local active = SG.Engine.Active()
+            if active then SG.Engine.PlaceCursor(active) end
+        end
         if SG.UI.Refresh then SG.UI.Refresh(false) end
         if SG.Tracker.Update then SG.Tracker.Update() end
     else

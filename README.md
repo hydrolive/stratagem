@@ -21,7 +21,7 @@ Log into the `_classic_beta_` client with Stratagem enabled.
 1. `/reload`. Until you start a route, the window opens on its own. Each guide has an Open button, and the first one is already selected so Continue is on the right. The tracker button is Choose a guide. Esc, the minimap button, and `/sg hide` close the window.
 2. The sidebar spec should match your class. Open it and pick a spec, reload, and confirm the choice stuck. `/sg spec` prints the key.
 3. Set faction to your side. Horde 1–30 and Alliance 1–30 should list zone guides. Tauren get Camp Narache & Mulgore. Orcs and trolls get Valley of Trials & Durotar. A guide for another race stays hidden. Shamans also get Call of Fire on the Durotar guide.
-4. Select The Barrens or an Alliance zone, press Continue, and confirm the step list, progress bar, and reward rows. Accept the quest in game and confirm the accept step marks itself done.
+4. Select The Barrens or an Alliance zone, press Continue, and confirm the step list, progress bar, and reward rows. On a character who already did some of those quests, the tracker should jump ahead and chat should say how many steps were skipped. Accept a listed quest in game and confirm the accept step marks itself done.
 5. Continue should raise the HUD arrow with a direction and a yard distance. `/sg arrowflip` reverses it. With TomTom enabled, Continue also drops a pin, and the HUD arrow stays.
 6. `/sg status` should say whether the live Naowh journal loaded or the bundled snapshot (131 quests, about level 6–34) is in use.
 
@@ -30,6 +30,8 @@ Log into the `_classic_beta_` client with Stratagem enabled.
 Pick your spec at the bottom of the sidebar, or leave **Match my talent tab** on. Feral tank and feral DPS share a talent tab, so the addon keeps feral DPS until you choose the tank spec yourself.
 
 Each quest on a route is three steps: accept, complete, turn in. Travel and "level toward" notes are optional and do not count toward the bar. Progress is saved per character. The quest log can mark steps done on its own (Options, on by default).
+
+Continue, Open, or Open in tab checks quests this character has already finished. Turned-in quests are skipped. A quest already in your log skips Accept, and skips Complete once the objectives are done. Turn in stays until you hand it in. Travel before the first quest you have not finished is skipped after that. A quest you never accepted stays on the route, even if you are past its level. Chat says how many steps were skipped. Prev still stays put until you select that guide again.
 
 **Only quests that are BiS for my spec** hides rewards that are ranked for a different spec. A quest still shows when the catalog lists it as BiS but the top-10 ranking slice does not name your spec. Quests for another class, race, or faction are always hidden. A guide with nothing left for you disappears from the list.
 
