@@ -183,6 +183,14 @@ function SG.Gear.Fact(itemID)
         row.classID = classID
         row.subID = subID
         row.subName = subName
+        local packed = SG.BiS and SG.BiS.ns and SG.BiS.ns.Shared and SG.BiS.ns.Shared.ItemFacts
+        packed = packed and packed[itemID]
+        if type(packed) == "table" then
+            if not row.classID and packed[1] then row.classID = packed[1] end
+            if not row.subID and packed[2] then row.subID = packed[2] end
+            if (not row.ilvl or row.ilvl == 0) and packed[3] and packed[3] > 0 then row.ilvl = packed[3] end
+            if packed[4] and packed[4] > 0 and (not row.req or row.req <= 1) then row.req = packed[4] end
+        end
         row.slot = equipLoc and EQUIP_SLOT[equipLoc] or nil
         local ItemDB = _G.ItemDB
         if ItemDB then

@@ -1144,6 +1144,9 @@ function SG.UI.RefreshSteps(resetScroll)
             if step.gearName then
                 bits[#bits + 1] = step.gearName
             end
+            if step.dropLine then
+                bits[#bits + 1] = step.dropLine
+            end
             if step.x and step.y then
                 bits[#bits + 1] = string.format("%.1f, %.1f", step.x, step.y)
             end

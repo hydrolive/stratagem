@@ -311,12 +311,14 @@ end
 
 local function AddFarmSteps(steps, dungeonSet)
     if not (SG.Route and SG.Route.FarmSteps) then return end
+    local farmed = {}
     local i = 1
     while i <= #steps do
         local name = dungeonSet[steps[i].segment or ""]
-        if not name or steps[i].kind == "farm" then
+        if not name or steps[i].kind == "farm" or farmed[name] then
             i = i + 1
         else
+            farmed[name] = true
             local seg = steps[i].segment
             local last = i
             while steps[last + 1] and steps[last + 1].segment == seg and steps[last + 1].kind ~= "farm" do
@@ -342,6 +344,7 @@ function SG.Engine.Compile(def)
     for s = 1, #segments do
         local segment = segments[s]
         if segment.dungeon then dungeonSet[segment.title] = segment.dungeon end
+        local from = #steps + 1
         if segment.arrive and segment.arrive.text then
             steps[#steps + 1] = Step({
                 kind = "travel",
@@ -379,6 +382,21 @@ function SG.Engine.Compile(def)
             row.match = row.match or "bis"
             row.level = row.level or prev
             steps[#steps + 1] = Step(row)
+        end
+        if segment.detour then
+            for i = from, #steps do
+                local step = steps[i]
+                step.detour = true
+                step.optional = true
+                local title = step.title or ""
+                if not title:find("(Optional)", 1, true) then
+                    step.title = "(Optional) " .. title
+                end
+                local text = step.text or ""
+                if not text:find("(Optional)", 1, true) then
+                    step.text = "(Optional) " .. text
+                end
+            end
         end
     end
     local added = InjectUpgrades(steps, def) or {}
@@ -432,6 +450,7 @@ function SG.Engine.Compile(def)
     }
     if SG.Gear and SG.Gear.Apply then SG.Gear.Apply(guide) end
     if SG.Route and SG.Route.PaintGuide then SG.Route.PaintGuide(guide) end
+    if guide.route and SG.Engine.AlignProgress then SG.Engine.AlignProgress(guide) end
     return guide
 end
 
@@ -547,6 +566,32 @@ end
 
 function SG.Engine.Get(id)
     return SG.Engine.byId[id]
+end
+
+-- Adding chain quests shifts step indexes. A changed list drops the old
+-- checkmarks so CatchUp can fill them from the quest log again.
+function SG.Engine.AlignProgress(guide)
+    if not guide or not SG.char or not SG.char.progress then return end
+    local ids = {}
+    for i = 1, #guide.steps do
+        ids[i] = guide.steps[i].questID or 0
+    end
+    local row = SG.Engine.Progress(guide.id)
+    local old = row.steps
+    local same = type(old) == "table" and #old == #ids
+    if same then
+        for i = 1, #ids do
+            if old[i] ~= ids[i] then
+                same = false
+                break
+            end
+        end
+    end
+    row.steps = ids
+    if same then return end
+    row.done = {}
+    row.cursor = nil
+    row.hold = nil
 end
 
 function SG.Engine.Progress(id)
@@ -705,6 +750,7 @@ end
 -- Optional farms and gear quests count. Travel notes do not.
 function SG.Engine.OnRoute(step)
     if not step or not step.visible then return false end
+    if step.detour then return false end
     if step.kind == "travel" or step.kind == "note" then return false end
     return true
 end
