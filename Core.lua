@@ -79,9 +79,16 @@ end
 function SG.After(seconds, fn)
     if C_Timer and C_Timer.After then
         C_Timer.After(seconds, fn)
-    else
-        fn()
+        return
     end
+    local wait = CreateFrame("Frame")
+    local elapsed = 0
+    wait:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + dt
+        if elapsed < (seconds or 0) then return end
+        self:SetScript("OnUpdate", nil)
+        fn()
+    end)
 end
 
 -- Lua 5.1 keeps every return value only when the call is the last argument.
@@ -210,6 +217,9 @@ function SG.OnLogin()
     SG.Minimap.Create()
     SG.Tracker.Create()
     SG.Arrow.Create()
+    if not SG.char.active then
+        SG.UI.Show()
+    end
     local events = {
         "QUEST_LOG_UPDATE", "QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED",
         "GET_ITEM_INFO_RECEIVED", "PLAYER_LEVEL_UP", "ZONE_CHANGED_NEW_AREA",

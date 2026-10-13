@@ -18,7 +18,7 @@ The window is a dark navy browser: categories on the left, guides in the middle,
 
 Log into the `_classic_beta_` client with Stratagem enabled.
 
-1. Type `/sg`. The navy window should open. Esc, the minimap button, and `/sg hide` close it.
+1. `/reload`. Until you start a route, the window opens on its own. Each guide has an Open button, and the first one is already selected so Continue is on the right. The tracker button is Choose a guide. Esc, the minimap button, and `/sg hide` close the window.
 2. The sidebar spec should match your class. Open it and pick a spec, reload, and confirm the choice stuck. `/sg spec` prints the key.
 3. Set faction to your side. Horde 1–30 and Alliance 1–30 should list zone guides. A guide for another class's only quest (Durotar's Call of Fire, for a non-shaman) stays hidden.
 4. Select The Barrens or an Alliance zone, press Continue, and confirm the step list, progress bar, and reward rows. Accept the quest in game and confirm the accept step marks itself done.

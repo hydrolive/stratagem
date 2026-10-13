@@ -10,6 +10,16 @@ SG.UI = SG.UI or {}
 local T = SG.Theme
 local SIDEBAR_W, DETAIL_W = 206, 300
 
+local function ListWidth(scroll)
+    local w = scroll and scroll:GetWidth() or 0
+    if not w or w < 40 then
+        local frameW = SG.UI.frame and SG.UI.frame:GetWidth() or 1040
+        w = frameW - SIDEBAR_W - DETAIL_W - 28
+    end
+    if w < 80 then w = 480 end
+    return w
+end
+
 local function Short(text, limit)
     text = text or ""
     if #text <= limit then return text end
@@ -307,7 +317,48 @@ function SG.UI.Create()
     local homeScroll = SG.Widgets.Scroll(home)
     homeScroll:SetPoint("TOPLEFT", 0, -36)
     homeScroll:SetPoint("BOTTOMRIGHT")
+    homeScroll.onSized = function()
+        if not SG.UI.home:IsShown() or SG.UI.sizing then return end
+        SG.UI.sizing = true
+        SG.After(0, function()
+            SG.UI.sizing = false
+            if SG.UI.frame and SG.UI.frame:IsShown() and SG.UI.home:IsShown() then
+                SG.UI.Refresh(false)
+            end
+        end)
+    end
     SG.UI.homeScroll = homeScroll
+
+    local empty = CreateFrame("Frame", nil, home)
+    empty:SetPoint("TOPLEFT", 24, -72)
+    empty:SetPoint("RIGHT", -24, 0)
+    empty:SetHeight(96)
+    empty:SetFrameLevel(home:GetFrameLevel() + 20)
+    empty:Hide()
+    local emptyText = SG.Widgets.Text(empty, 13)
+    emptyText:SetPoint("TOPLEFT")
+    emptyText:SetPoint("TOPRIGHT")
+    emptyText:SetJustifyH("LEFT")
+    emptyText:SetWordWrap(true)
+    emptyText:SetHeight(36)
+    emptyText:SetText("No guides match these filters.")
+    local showBoth = SG.Widgets.Button(empty, "Show both factions", "primary")
+    showBoth:SetSize(180, 28)
+    showBoth:SetPoint("TOPLEFT", 0, -40)
+    showBoth:SetScript("OnClick", function()
+        SG.db.options.faction = "both"
+        SG.UI.Refresh(true)
+    end)
+    local showSpecs = SG.Widgets.Button(empty, "Show every spec", "ghost")
+    showSpecs:SetSize(160, 28)
+    showSpecs:SetPoint("LEFT", showBoth, "RIGHT", 8, 0)
+    showSpecs:SetScript("OnClick", function()
+        SG.db.options.onlyMySpec = false
+        SG.Engine.Rebuild()
+        if SG.db.options.autoAdvance then SG.Engine.SyncAll() end
+        SG.UI.Refresh(true)
+    end)
+    SG.UI.empty = empty
 
     local steps = CreateFrame("Frame", nil, center)
     steps:SetPoint("TOPLEFT", tabbar, "BOTTOMLEFT", 0, 0)
@@ -662,6 +713,7 @@ end
 local function GuideRow(parent)
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(58)
+    row:SetFrameLevel(parent:GetFrameLevel() + 2)
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     row.bg = bg
@@ -671,26 +723,33 @@ local function GuideRow(parent)
     bar:SetPoint("BOTTOMLEFT", 0, 4)
     SG.Paint(bar, T.accent)
     row.bar = bar
+    local open = SG.Widgets.Button(row, "Open", "primary")
+    open:SetSize(58, 22)
+    open:SetPoint("RIGHT", -8, 4)
+    open:SetScript("OnClick", function()
+        if row.guideID then SG.UI.Continue(row.guideID) end
+    end)
+    row.open = open
     local title = SG.Widgets.Text(row, 13)
     title:SetPoint("TOPLEFT", 12, -8)
-    title:SetPoint("RIGHT", -28, 0)
+    title:SetPoint("RIGHT", open, "LEFT", -8, 0)
     title:SetJustifyH("LEFT")
     row.title = title
     local sub = SG.Widgets.Text(row, 11)
     sub:SetPoint("TOPLEFT", 12, -28)
-    sub:SetPoint("RIGHT", -28, 0)
+    sub:SetPoint("RIGHT", open, "LEFT", -8, 0)
     sub:SetJustifyH("LEFT")
     sub:SetTextColor(SG.RGB(T.muted))
     row.sub = sub
     local star = row:CreateTexture(nil, "OVERLAY")
     star:SetSize(14, 14)
-    star:SetPoint("RIGHT", -8, 6)
+    star:SetPoint("RIGHT", open, "LEFT", -6, 8)
     star:SetTexture(SG.MEDIA .. "cat_favorites.tga")
     row.star = star
     local mini = SG.Widgets.Bar(row)
     mini:SetHeight(3)
     mini:SetPoint("BOTTOMLEFT", 12, 6)
-    mini:SetPoint("BOTTOMRIGHT", -12, 6)
+    mini:SetPoint("BOTTOMRIGHT", -78, 6)
     row.mini = mini
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetScript("OnClick", function(self, button)
@@ -711,6 +770,15 @@ local function GuideRow(parent)
         if SG.db.selected ~= self.guideID then SG.Paint(self.bg, T.rowHot) end
     end)
     row:SetScript("OnLeave", function(self) SG.UI.PaintGuide(self) end)
+    open:SetFrameLevel(row:GetFrameLevel() + 2)
+    local function wheel(_, delta)
+        local turn = parent:GetScript("OnMouseWheel")
+        if turn then turn(parent, delta) end
+    end
+    row:EnableMouseWheel(true)
+    row:SetScript("OnMouseWheel", wheel)
+    open:EnableMouseWheel(true)
+    open:SetScript("OnMouseWheel", wheel)
     return row
 end
 
@@ -733,6 +801,7 @@ end
 local function StepRow(parent)
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(48)
+    row:SetFrameLevel(parent:GetFrameLevel() + 2)
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     row.bg = bg
@@ -764,6 +833,11 @@ local function StepRow(parent)
         if SG.state.stepIndex ~= self.index then SG.Paint(self.bg, T.rowHot) end
     end)
     row:SetScript("OnLeave", function(self) SG.UI.PaintStep(self) end)
+    row:EnableMouseWheel(true)
+    row:SetScript("OnMouseWheel", function(_, delta)
+        local turn = parent:GetScript("OnMouseWheel")
+        if turn then turn(parent, delta) end
+    end)
     return row
 end
 
@@ -870,7 +944,8 @@ function SG.UI.RefreshHome(resetScroll)
     HidePool(SG.UI.headerPool)
     local content = SG.UI.homeScroll.content
     local scroll = SG.UI.homeScroll.scroll
-    content:SetWidth(math.max(1, scroll:GetWidth()))
+    local width = ListWidth(scroll)
+    content:SetWidth(width)
     local category = SG.db.category or "all"
     local faction = SG.FactionFilter()
     local query = SG.state.query or ""
@@ -900,22 +975,26 @@ function SG.UI.RefreshHome(resetScroll)
             push(guide.group or "Guides", guide)
         end
     end
+    local firstId = nil
+    local selectedOk = false
     for g = 1, #order do
         local name = order[g]
         local header = Acquire(SG.UI.headerPool, content, Header)
         header:ClearAllPoints()
-        header:SetPoint("TOPLEFT", 4, -y)
-        header:SetPoint("RIGHT", -8, 0)
+        header:SetPoint("TOPLEFT", content, "TOPLEFT", 4, -y)
+        header:SetSize(math.max(40, width - 16), 26)
         header.text:SetText(name)
         y = y + 26
         local list = groups[name]
         for i = 1, #list do
             local guide = list[i]
+            if not firstId then firstId = guide.id end
+            if guide.id == SG.db.selected then selectedOk = true end
             local row = Acquire(SG.UI.guidePool, content, GuideRow)
             row.guideID = guide.id
             row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", 8, -y)
-            row:SetPoint("RIGHT", -8, 0)
+            row:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y)
+            row:SetSize(math.max(40, width - 16), 58)
             row.title:SetText(guide.title)
             local done, total = SG.Engine.Stats(guide)
             row.sub:SetText(string.format("%d-%d   %s   %d steps", guide.min or 1, guide.max or 60, SG.SideName(guide.side), total))
@@ -929,11 +1008,11 @@ function SG.UI.RefreshHome(resetScroll)
             y = y + 62
         end
     end
+    if not selectedOk then SG.db.selected = firstId end
+    if SG.UI.empty then
+        if #order == 0 then SG.UI.empty:Show() else SG.UI.empty:Hide() end
+    end
     if #order == 0 then
-        local header = Acquire(SG.UI.headerPool, content, Header)
-        header:ClearAllPoints()
-        header:SetPoint("TOPLEFT", 8, -8)
-        header.text:SetText("Nothing in this list")
         y = 40
     end
     content:SetHeight(math.max(y + 12, scroll:GetHeight() + 1))
@@ -946,7 +1025,8 @@ function SG.UI.RefreshSteps(resetScroll)
     local guide = SG.Engine.Get(SG.state.tab)
     local content = SG.UI.stepScroll.content
     local scroll = SG.UI.stepScroll.scroll
-    content:SetWidth(math.max(1, scroll:GetWidth()))
+    local width = ListWidth(scroll)
+    content:SetWidth(width)
     if not guide then
         content:SetHeight(math.max(1, scroll:GetHeight() + 1))
         if resetScroll then SG.UI.stepScroll:Reset() else SG.UI.stepScroll.Update() end
@@ -963,8 +1043,8 @@ function SG.UI.RefreshSteps(resetScroll)
             if step.segment ~= last then
                 local header = Acquire(SG.UI.headerPool, content, Header)
                 header:ClearAllPoints()
-                header:SetPoint("TOPLEFT", 4, -y)
-                header:SetPoint("RIGHT", -8, 0)
+                header:SetPoint("TOPLEFT", content, "TOPLEFT", 4, -y)
+                header:SetSize(math.max(40, width - 16), 26)
                 header.text:SetText(step.segment or guide.title)
                 last = step.segment
                 y = y + 24
@@ -973,8 +1053,8 @@ function SG.UI.RefreshSteps(resetScroll)
             row.index = i
             row.done = SG.Engine.IsDone(guide, i)
             row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", 8, -y)
-            row:SetPoint("RIGHT", -8, 0)
+            row:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y)
+            row:SetSize(math.max(40, width - 16), 48)
             local prefix = row.done and "Done  " or ""
             row.title:SetText(prefix .. step.title)
             local bits = {}
@@ -1051,7 +1131,7 @@ function SG.UI.RefreshDetail()
         detail.eyebrow:SetText("STRATAGEM")
         detail.title:SetText("Pick a guide")
         detail.meta:SetText("BiS before speed")
-        detail.blurb:SetText("Choose a route on the left. Double-click a guide, or press Continue, to open it in a tab.")
+        detail.blurb:SetText("Click Open on a guide in the list. Continue on the right starts the highlighted one.")
         detail.zone:SetText("")
         detail.hidden:SetText("")
         detail.bar:SetPercent(0)

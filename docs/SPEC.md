@@ -6,7 +6,8 @@ WoW Forever leveling guide. Target client: `D:\WoW\World of Warcraft\_classic_be
 
 - Window: left categories, center guide list, right detail. Dark navy panels, violet actions, gold labels. Categories: All guides, Leveling, Professions, Reputation, Exploration, Legacy, Collectibles, Dungeons, Favorites, Options.
 - Guides are grouped by bracket and zone (Horde and Alliance, 1–30 and 30–40, plus the other categories).
-- Detail shows the zone, level range, faction, step count, progress, Continue, Open in tab, and Open in new tab. Continue opens the guide and sets the waypoint. Open in tab replaces the current guide tab. Open in new tab adds one, up to four.
+- Detail shows the zone, level range, faction, step count, progress, Continue, Open in tab, and Open in new tab. Each guide row has an Open button. The first visible guide is selected so Continue is available without an extra click. Continue opens the guide and sets the waypoint. Open in tab replaces the current guide tab. Open in new tab adds one, up to four.
+- Until a guide has been started, login opens the window. The tracker shows Choose a guide instead of step buttons. Prev, Next, Done, and Point open that window when nothing is selected.
 - Each quest is accept, complete, then turn in. Travel and "level toward" notes are optional and do not count. Progress is per character.
 - Spec is chosen in the sidebar or with `/sg spec <key>`. Keys match NaowhForever_BiS (`arms-warrior`, `feral-dps-druid`, `feral-tank-druid`, …). Auto-detect uses the classic talent tab. Feral tank shares tab 2 with feral DPS and stays a manual choice.
 - Wrong class, race, or faction is never shown. "Only quests that are BiS for my spec" hides rewards ranked for other specs. A journal BiS quest that the top-10 ranking slice names for nobody stays visible.
@@ -42,4 +43,6 @@ On the Forever character screen, enable Stratagem. In game:
 
 ## Last change
 
-Initial addon: Forever-only spec, native UI, BiS snapshot, curated routes, agent rules, and a copy into the Forever AddOns folder. Test the seven steps above.
+Guide rows were not reliable buttons: the list could lay out at zero width, and the tracker only said to open a guide. Each row now has an Open button, the first guide is selected so Continue shows on the right, and the tracker has Choose a guide.
+
+Test: `/reload`. The window opens. Horde or Alliance 1–30 lists guides with an Open button on each row. Open or Continue starts that route. The tracker then shows Prev, Point, Done, and Next.

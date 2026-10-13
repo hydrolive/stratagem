@@ -447,7 +447,8 @@ end
 function SG.Engine.Nudge(direction)
     local guide = SG.Engine.Active() or SG.Engine.Get(SG.db.selected)
     if not guide then
-        SG.Print("Open a guide first.")
+        if SG.UI and SG.UI.Show then SG.UI.Show() end
+        SG.Print("Choose a guide in the list, then press Continue.")
         return
     end
     local current = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
@@ -475,7 +476,11 @@ end
 
 function SG.Engine.WaypointCurrent()
     local guide = SG.Engine.Active() or SG.Engine.Get(SG.db.selected)
-    if not guide then return end
+    if not guide then
+        if SG.UI and SG.UI.Show then SG.UI.Show() end
+        SG.Print("Choose a guide in the list, then press Continue.")
+        return
+    end
     local index = SG.Engine.CurrentIndex(guide) or SG.Engine.FirstVisible(guide)
     if index then SG.Engine.Focus(guide, index, true) end
 end

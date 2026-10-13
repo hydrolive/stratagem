@@ -82,6 +82,11 @@ function SG.Tracker.Create()
     frame.waypoint:SetScript("OnClick", function() SG.Engine.WaypointCurrent() end)
     frame.done:SetScript("OnClick", function() SG.Engine.Nudge(0) end)
     frame.next:SetScript("OnClick", function() SG.Engine.Nudge(1) end)
+    local choose = SG.Widgets.Button(frame, "Choose a guide", "primary")
+    choose:SetPoint("BOTTOMLEFT", 12, 10)
+    choose:SetPoint("BOTTOMRIGHT", -12, 10)
+    choose:SetScript("OnClick", function() SG.UI.Show() end)
+    frame.choose = choose
 
     SG.Tracker.frame = frame
     SG.Tracker.Update()
@@ -95,15 +100,32 @@ function SG.Tracker.Update()
         return
     end
     local guide = SG.Engine.Active()
+    local function steps(show)
+        if show then
+            frame.prev:Show()
+            frame.waypoint:Show()
+            frame.done:Show()
+            frame.next:Show()
+            frame.choose:Hide()
+        else
+            frame.prev:Hide()
+            frame.waypoint:Hide()
+            frame.done:Hide()
+            frame.next:Hide()
+            frame.choose:Show()
+        end
+    end
     if not guide then
         frame:Show()
+        steps(false)
         frame.count:SetText("")
-        frame.step:SetText("Open a guide and press Continue.")
-        frame.coord:SetText("No route yet.")
+        frame.step:SetText("Choose a guide to follow.")
+        frame.coord:SetText("Open is on each guide in the list.")
         frame.bar:SetPercent(0)
         return
     end
     frame:Show()
+    steps(true)
     local done, total = SG.Engine.Stats(guide)
     local percent = total > 0 and (done / total) or 0
     frame.bar:SetPercent(percent, total > 0 and done == total)

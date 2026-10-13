@@ -170,6 +170,14 @@ function SG.Widgets.Scroll(parent)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(100, 100)
     scroll:SetScrollChild(content)
+    -- Rows live on the scroll child. Keep that child above the scroll frame
+    -- so a click lands on the row instead of the frame behind it.
+    content:SetFrameLevel(scroll:GetFrameLevel() + 1)
+    content:EnableMouseWheel(true)
+    content:SetScript("OnMouseWheel", function(_, delta)
+        local turn = scroll:GetScript("OnMouseWheel")
+        if turn then turn(scroll, delta) end
+    end)
 
     local bar = CreateFrame("Frame", nil, holder)
     bar:SetWidth(4)
@@ -209,9 +217,15 @@ function SG.Widgets.Scroll(parent)
         scroll:SetVerticalScroll(next)
         Update()
     end)
-    scroll:SetScript("OnSizeChanged", function()
-        content:SetWidth(math.max(1, scroll:GetWidth()))
+    local reported = 0
+    scroll:SetScript("OnSizeChanged", function(self)
+        local w = self:GetWidth() or 0
+        content:SetWidth(math.max(1, w))
         Update()
+        if holder.onSized and w >= 40 and math.abs(w - reported) > 2 then
+            reported = w
+            holder.onSized(w)
+        end
     end)
 
     holder.scroll = scroll
