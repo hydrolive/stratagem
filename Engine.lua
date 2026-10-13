@@ -287,7 +287,7 @@ local function ApplyVisibility(steps)
     end
     for i = 1, #steps do
         local step = steps[i]
-        if not step.questID and not segmentLive[step.segment or ""] then
+        if not step.questID and not step.pinned and not segmentLive[step.segment or ""] then
             step.visible = false
         end
     end
@@ -309,12 +309,39 @@ local function CountLevels(steps)
     return minLevel, maxLevel, quests
 end
 
+local function AddFarmSteps(steps, dungeonSet)
+    if not (SG.Route and SG.Route.FarmSteps) then return end
+    local i = 1
+    while i <= #steps do
+        local name = dungeonSet[steps[i].segment or ""]
+        if not name or steps[i].kind == "farm" then
+            i = i + 1
+        else
+            local seg = steps[i].segment
+            local last = i
+            while steps[last + 1] and steps[last + 1].segment == seg and steps[last + 1].kind ~= "farm" do
+                last = last + 1
+            end
+            local sample = steps[last]
+            local farms = SG.Route.FarmSteps(name, seg, sample.zone, sample.level)
+            local at = last + 1
+            for f = 1, #farms do
+                table.insert(steps, at, Step(farms[f]))
+                at = at + 1
+            end
+            i = at
+        end
+    end
+end
+
 function SG.Engine.Compile(def)
     local steps = {}
     local segments = def.segments or {}
-    local gaps = def.category == "leveling"
+    local gaps = def.category == "leveling" and not def.route
+    local dungeonSet = {}
     for s = 1, #segments do
         local segment = segments[s]
+        if segment.dungeon then dungeonSet[segment.title] = segment.dungeon end
         if segment.arrive and segment.arrive.text then
             steps[#steps + 1] = Step({
                 kind = "travel",
@@ -322,7 +349,7 @@ function SG.Engine.Compile(def)
                 match = "bis",
                 segment = segment.title,
                 zone = segment.zone or segment.title,
-                title = "Travel: " .. (segment.title or def.title),
+                title = "Travel: " .. (segment.travel or segment.title or def.title),
                 text = segment.arrive.text,
                 map = segment.arrive.map,
                 x = segment.arrive.x,
@@ -337,14 +364,41 @@ function SG.Engine.Compile(def)
         end
         local quests = segment.quests or {}
         for q = 1, #quests do
-            local quest = SG.BiS.Quest(quests[q])
+            local entry = quests[q]
+            local quest = type(entry) == "table" and entry or SG.BiS.Quest(entry)
             if quest then
                 AddQuest(steps, def, segment, quest, prev, gaps)
                 prev = quest.level or prev
             end
         end
+        local extras = segment.extras or {}
+        for e = 1, #extras do
+            local row = extras[e]
+            row.segment = row.segment or segment.title
+            row.zone = row.zone or segment.zone or segment.title
+            row.match = row.match or "bis"
+            row.level = row.level or prev
+            steps[#steps + 1] = Step(row)
+        end
     end
-    InjectUpgrades(steps, def)
+    local added = InjectUpgrades(steps, def) or {}
+    if def.route then
+        for i = 1, #steps do
+            local step = steps[i]
+            if step.questID and added[step.questID] then
+                step.optional = true
+                local text = step.text or ""
+                if not text:find("(Optional)", 1, true) then
+                    step.text = "(Optional) " .. text
+                end
+                local title = step.title or ""
+                if not title:find("(Optional)", 1, true) then
+                    step.title = "(Optional) " .. title
+                end
+            end
+        end
+    end
+    AddFarmSteps(steps, dungeonSet)
     for i = 1, #steps do
         steps[i].index = i
         steps[i].guide = def.id
@@ -353,7 +407,8 @@ function SG.Engine.Compile(def)
     local minLevel, maxLevel, quests = CountLevels(steps)
     local visibleQuests = 0
     for i = 1, #steps do
-        if steps[i].visible and steps[i].kind == "accept" then
+        local step = steps[i]
+        if step.visible and (step.kind == "accept" or step.kind == "gear") then
             visibleQuests = visibleQuests + 1
         end
     end
@@ -371,9 +426,12 @@ function SG.Engine.Compile(def)
         hiddenQuests = hidden,
         questCount = quests,
         visibleQuests = visibleQuests,
-        empty = visibleQuests == 0,
+        empty = visibleQuests == 0 and not def.keep,
+        route = def.route and true or false,
+        keep = def.keep and true or false,
     }
     if SG.Gear and SG.Gear.Apply then SG.Gear.Apply(guide) end
+    if SG.Route and SG.Route.PaintGuide then SG.Route.PaintGuide(guide) end
     return guide
 end
 
@@ -451,9 +509,7 @@ end
 function SG.Engine.Rebuild()
     SG.Engine.guides = {}
     SG.Engine.byId = {}
-    local data = SG.GuideData or {}
-    for i = 1, #data do
-        local def = data[i]
+    local function add(def)
         if def.dynamic then
             def = {
                 id = def.id, title = def.title, group = def.group,
@@ -465,6 +521,27 @@ function SG.Engine.Rebuild()
         local guide = SG.Engine.Compile(def)
         SG.Engine.guides[#SG.Engine.guides + 1] = guide
         SG.Engine.byId[guide.id] = guide
+    end
+    local data = SG.GuideData or {}
+    for i = 1, #data do
+        local def = data[i]
+        if not def.weave then add(def) end
+    end
+    if SG.Route and SG.Route.Leveling then
+        add(SG.Route.Leveling("H"))
+        add(SG.Route.Leveling("A"))
+    end
+    if SG.Route and SG.Route.Endgame then
+        local bis = SG.Route.Endgame()
+        if bis then
+            SG.Engine.guides[#SG.Engine.guides + 1] = bis
+            SG.Engine.byId[bis.id] = bis
+            if SG.Route.PaintGuide then SG.Route.PaintGuide(bis) end
+        end
+    end
+    if SG.Route and SG.Route.Attunements then
+        local list = SG.Route.Attunements()
+        for i = 1, #list do add(list[i]) end
     end
 end
 
@@ -559,7 +636,7 @@ function SG.Engine.SyncGuide(guide)
     local row = SG.Engine.Progress(guide.id)
     for i = 1, #guide.steps do
         local step = guide.steps[i]
-        if step.visible and step.questID and not step.optional then
+        if step.visible and step.questID then
             -- Prev cleared this step on purpose. Leave it until Next or Done.
             if not (row.hold and row.hold == i) and not row.done[i] then
                 local state = cache[step.questID]
@@ -605,7 +682,9 @@ function SG.Engine.PlaceCursor(guide)
         local limit = first and (first - 1) or #guide.steps
         for i = 1, limit do
             local step = guide.steps[i]
-            if step.visible and not (row.hold and row.hold == i) then
+            -- Farms and optional gear quests stay open. Only the travel notes
+            -- before the first real step are skipped once the route is underway.
+            if step.visible and (step.kind == "travel" or step.kind == "note") and not (row.hold and row.hold == i) then
                 SG.Engine.Mark(guide, i, true)
             end
         end
@@ -614,7 +693,59 @@ function SG.Engine.PlaceCursor(guide)
     local cursor = row.cursor
     local step = cursor and guide.steps[cursor]
     if not step or not step.visible or SG.Engine.IsDone(guide, cursor) then
-        row.cursor = first
+        if guide.route and SG.Engine.Aim then
+            row.cursor = SG.Engine.Aim(guide) or first
+        else
+            row.cursor = first
+        end
+    end
+end
+
+-- The next step the player should be standing on for their level.
+-- Optional farms and gear quests count. Travel notes do not.
+function SG.Engine.OnRoute(step)
+    if not step or not step.visible then return false end
+    if step.kind == "travel" or step.kind == "note" then return false end
+    return true
+end
+
+function SG.Engine.Aim(guide)
+    if not guide then return nil end
+    local level = UnitLevel("player") or 1
+    local floor = level - 2
+    if floor < 1 then floor = 1 end
+    local first
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if SG.Engine.OnRoute(step) and not SG.Engine.IsDone(guide, i) then
+            if not first then first = i end
+            local lv = step.level or level
+            if lv >= floor then return i end
+        end
+    end
+    return first
+end
+
+function SG.Engine.AimForward(guide)
+    if not guide or not guide.route then return end
+    local row = SG.Engine.Progress(guide.id)
+    if row.hold then return end
+    local aim = SG.Engine.Aim(guide)
+    if not aim then return end
+    local cursor = row.cursor
+    local step = cursor and guide.steps[cursor]
+    local level = UnitLevel("player") or 1
+    local lv = step and step.level or 0
+    if step and not SG.Engine.IsDone(guide, cursor) and lv >= level - 2 then return end
+    if cursor and aim <= cursor and step and not SG.Engine.IsDone(guide, cursor) then return end
+    row.cursor = aim
+    if SG.state and (SG.state.tab == guide.id or SG.state.tab == "home") then
+        SG.state.stepIndex = aim
+    end
+    if SG.Nav and SG.Nav.following then
+        SG.Engine.Focus(guide, aim, true)
+    elseif SG.Tracker and SG.Tracker.Update then
+        SG.Tracker.Update()
     end
 end
 
@@ -691,7 +822,7 @@ function SG.Engine.Nudge(direction)
     local guide = SG.Engine.Active() or SG.Engine.Get(SG.db.selected)
     if not guide then
         if SG.UI and SG.UI.Show then SG.UI.Show() end
-        SG.Print("Choose a guide in the list, then press Continue.")
+        SG.Print("The leveling route is not ready yet.")
         return
     end
     local row = SG.Engine.Progress(guide.id)
@@ -741,7 +872,7 @@ function SG.Engine.WaypointCurrent()
     local guide = SG.Engine.Active() or SG.Engine.Get(SG.db.selected)
     if not guide then
         if SG.UI and SG.UI.Show then SG.UI.Show() end
-        SG.Print("Choose a guide in the list, then press Continue.")
+        SG.Print("The leveling route is not ready yet.")
         return
     end
     local index = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)

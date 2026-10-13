@@ -1,6 +1,6 @@
--- Guides.lua: the routes. Each quest id is expanded by Engine.lua into
--- accept / complete / turn-in steps. Dynamic guides are built from the BiS
--- catalog, so they stay current when that catalog is regenerated.
+-- Guides.lua: the route sources. Leveling entries are woven into one
+-- faction route by Route.lua. They are not a menu the player picks.
+-- Each quest id is expanded by Engine.lua into accept / complete / turn-in.
 local _, SG = ...
 if type(SG) ~= "table" then
     SG = _G.Stratagem or {}
@@ -35,17 +35,23 @@ local function Guide(def)
             Segment(def.segment or def.title, def.place, def.map, def.x, def.y, def.arrive, def.quests),
         }
     end
+    -- Zone writeups feed the one leveling route. They are not their own category.
+    local weave = def.weave
+    if weave == nil and not def.dynamic and def.category == nil then
+        weave = true
+    end
     return {
         id = def.id,
         title = def.title,
         group = def.group,
-        category = def.category or "leveling",
+        category = def.category or (weave and "source" or "leveling"),
         side = def.side,
         min = def.min,
         max = def.max,
         place = def.place or def.title,
         blurb = def.blurb,
         dynamic = def.dynamic,
+        weave = weave and true or false,
         segments = segments,
     }
 end

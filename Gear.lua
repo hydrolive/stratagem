@@ -596,6 +596,7 @@ function SG.Gear.ApplyAll()
     for i = 1, #guides do
         SG.Gear.Apply(guides[i])
     end
+    if SG.Route and SG.Route.Paint then SG.Route.Paint() end
 end
 
 local refreshPending = false

@@ -1,6 +1,6 @@
 ## Interface: 16001, 120007, 120100, 11509, 20506, 38002, 40402, 50504
 ## Title: Stratagem
-## Notes: Leveling routes that name every gear upgrade, and mark the best piece for your level.
+## Notes: One leveling route that follows your level, names every gear upgrade, and marks the best piece for that level.
 ## Author: Stratagem
 ## Version: 1.0.0
 ## SavedVariables: StratagemDB
@@ -16,6 +16,7 @@ Data\ItemSpecs.lua
 BiS.lua
 Gear.lua
 Guides.lua
+Route.lua
 Engine.lua
 Nav.lua
 UI\Theme.lua

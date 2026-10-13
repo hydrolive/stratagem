@@ -26,7 +26,6 @@ SG.Theme = {
 }
 
 SG.CATEGORIES = {
-    { id = "all",          name = "All guides",   icon = "cat_all.tga" },
     { id = "leveling",     name = "Leveling",     icon = "cat_leveling.tga" },
     { id = "professions",  name = "Professions",  icon = "cat_professions.tga" },
     { id = "reputation",   name = "Reputation",   icon = "cat_reputation.tga" },
@@ -35,5 +34,7 @@ SG.CATEGORIES = {
     { id = "collectibles", name = "Collectibles", icon = "cat_collectibles.tga" },
     { id = "dungeons",     name = "Dungeons",     icon = "cat_dungeons.tga" },
     { id = "favorites",    name = "Favorites",    icon = "cat_favorites.tga" },
+    { id = "bis",          name = "Level 60 BiS", icon = "cat_collectibles.tga" },
+    { id = "attune",       name = "Attunements",  icon = "cat_dungeons.tga" },
     { id = "options",      name = "Options",      icon = "cat_options.tga" },
 }

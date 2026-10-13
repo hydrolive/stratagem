@@ -136,13 +136,30 @@ function SG.UI.Show()
     if SG.UI.frame then SG.UI.frame:Show() end
 end
 
+function SG.UI.DirectId()
+    local category = SG.db and SG.db.category
+    if category == "leveling" and SG.Route and SG.Route.ActiveId then
+        return SG.Route.ActiveId()
+    end
+    if category == "bis" then return "bis-60" end
+    return nil
+end
+
 function SG.UI.ShowGuides()
     if not SG.db then return end
     if not SG.UI.frame then SG.UI.Create() end
     if not SG.UI.frame then return end
     SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
-    if SG.db.category == "options" then SG.db.category = "all" end
-    SG.state.tab = "home"
+    SG.db.category = "leveling"
+    local id = SG.UI.DirectId()
+    local guide = id and SG.Engine.Get(id)
+    if guide then
+        SG.state.tab = id
+        local index = SG.Engine.ShownIndex(guide)
+        SG.Engine.Focus(guide, index, true)
+    else
+        SG.state.tab = "home"
+    end
     SG.UI.frame:Show()
     SG.UI.Refresh(true)
 end
@@ -215,8 +232,10 @@ function SG.UI.Create()
 
     local search = SG.Widgets.Search(sidebar, function(text)
         SG.state.query = text or ""
-        if SG.db.category == "options" then SG.db.category = "all" end
-        SG.state.tab = "home"
+        if SG.db.category == "options" then SG.db.category = "leveling" end
+        if SG.db.category ~= "leveling" and SG.db.category ~= "bis" then
+            SG.state.tab = "home"
+        end
         SG.UI.Refresh(true)
     end)
     search:SetPoint("TOPLEFT", 12, -112)
@@ -249,7 +268,19 @@ function SG.UI.Create()
         button.id = info.id
         button:SetScript("OnClick", function(self)
             SG.db.category = self.id
-            if self.id ~= "options" then SG.state.tab = "home" end
+            if self.id == "leveling" or self.id == "bis" then
+                local id = self.id == "bis" and "bis-60" or (SG.Route and SG.Route.ActiveId and SG.Route.ActiveId())
+                local guide = id and SG.Engine.Get(id)
+                if guide then
+                    SG.state.tab = id
+                    SG.db.selected = id
+                    if self.id == "leveling" then
+                        SG.Engine.Focus(guide, SG.Engine.ShownIndex(guide), true)
+                    end
+                end
+            elseif self.id ~= "options" then
+                SG.state.tab = "home"
+            end
             SG.UI.Refresh(true)
         end)
         button:SetScript("OnEnter", function(self)
@@ -922,11 +953,17 @@ function SG.UI.RefreshTabs()
         button.label:SetTextColor(SG.RGB(on and T.text or T.muted))
         button:SetScript("OnClick", function()
             if id == "home" then
-                SG.state.tab = "home"
-                if SG.db.category == "options" then SG.db.category = "all" end
+                local direct = SG.UI.DirectId()
+                if direct and SG.Engine.Get(direct) then
+                    SG.state.tab = direct
+                    SG.db.selected = direct
+                else
+                    SG.state.tab = "home"
+                end
+                if SG.db.category == "options" then SG.db.category = "leveling" end
             else
                 SG.state.tab = id
-                if SG.db.category == "options" then SG.db.category = "all" end
+                if SG.db.category == "options" then SG.db.category = "leveling" end
                 SG.db.selected = id
                 SG.char.active = id
                 local guide = SG.Engine.Get(id)
@@ -963,7 +1000,7 @@ local function Passes(guide, category, faction, query)
     if guide.empty then return false end
     if category == "favorites" then
         if not SG.db.favorites[guide.id] then return false end
-    elseif category ~= "all" and guide.category ~= category then
+    elseif guide.category ~= category then
         return false
     end
     if faction ~= "both" and guide.side ~= "B" and guide.side ~= faction then
@@ -979,7 +1016,7 @@ function SG.UI.RefreshHome(resetScroll)
     local scroll = SG.UI.homeScroll.scroll
     local width = ListWidth(scroll)
     content:SetWidth(width)
-    local category = SG.db.category or "all"
+    local category = SG.db.category or "leveling"
     local faction = SG.FactionFilter()
     local query = SG.state.query or ""
     local y = 4
@@ -992,15 +1029,6 @@ function SG.UI.RefreshHome(resetScroll)
             order[#order + 1] = name
         end
         group[#group + 1] = guide
-    end
-    if category == "all" and query == "" then
-        local recent = SG.db.recent or {}
-        for i = 1, #recent do
-            local guide = SG.Engine.Get(recent[i])
-            if guide and Passes(guide, "all", faction, "") then
-                push("Recent", guide)
-            end
-        end
     end
     for i = 1, #SG.Engine.guides do
         local guide = SG.Engine.guides[i]
@@ -1068,11 +1096,21 @@ function SG.UI.RefreshSteps(resetScroll)
     if not SG.state.stepIndex or not guide.steps[SG.state.stepIndex] or not guide.steps[SG.state.stepIndex].visible then
         SG.state.stepIndex = SG.Engine.ShownIndex(guide)
     end
+    local query = (SG.state.query or ""):lower()
+    local function listed(step)
+        if query == "" then return true end
+        if step.title and step.title:lower():find(query, 1, true) then return true end
+        if step.segment and step.segment:lower():find(query, 1, true) then return true end
+        if step.text and step.text:lower():find(query, 1, true) then return true end
+        return false
+    end
     local y = 4
     local last = nil
+    local focusAt = nil
+    local shown = SG.Engine.ShownIndex(guide)
     for i = 1, #guide.steps do
         local step = guide.steps[i]
-        if step.visible then
+        if step.visible and listed(step) then
             if step.segment ~= last then
                 local header = Acquire(SG.UI.headerPool, content, Header)
                 header:ClearAllPoints()
@@ -1082,6 +1120,7 @@ function SG.UI.RefreshSteps(resetScroll)
                 last = step.segment
                 y = y + 24
             end
+            if i == shown then focusAt = y end
             local row = Acquire(SG.UI.stepPool, content, StepRow)
             row.index = i
             row.done = SG.Engine.IsDone(guide, i)
@@ -1091,7 +1130,10 @@ function SG.UI.RefreshSteps(resetScroll)
             local prefix = row.done and "Done  " or ""
             row.title:SetText(prefix .. step.title)
             local bits = {}
-            if step.level and step.questID then bits[#bits + 1] = "Lv " .. step.level end
+            if step.level and (step.questID or step.kind == "farm" or step.kind == "gear") then
+                bits[#bits + 1] = "Lv " .. step.level
+            end
+            if step.optional then bits[#bits + 1] = "(Optional)" end
             if step.bisFrom == "level" then
                 bits[#bits + 1] = "Level BiS"
             elseif step.bisFrom == "upgrade" then
@@ -1101,8 +1143,6 @@ function SG.UI.RefreshSteps(resetScroll)
             end
             if step.gearName then
                 bits[#bits + 1] = step.gearName
-            elseif step.optional and step.bisFrom == nil then
-                bits[#bits + 1] = "Optional"
             end
             if step.x and step.y then
                 bits[#bits + 1] = string.format("%.1f, %.1f", step.x, step.y)
@@ -1121,7 +1161,16 @@ function SG.UI.RefreshSteps(resetScroll)
         end
     end
     content:SetHeight(math.max(y + 12, scroll:GetHeight() + 1))
-    if resetScroll then SG.UI.stepScroll:Reset() else SG.UI.stepScroll.Update() end
+    if resetScroll then
+        local maxScroll = math.max(0, content:GetHeight() - scroll:GetHeight())
+        local offset = 0
+        if focusAt and focusAt > 40 then offset = focusAt - 28 end
+        if offset > maxScroll then offset = maxScroll end
+        scroll:SetVerticalScroll(offset)
+        SG.UI.stepScroll.Update()
+    else
+        SG.UI.stepScroll.Update()
+    end
 end
 
 local function ShowRewards(detail, step)
@@ -1182,7 +1231,7 @@ function SG.UI.RefreshDetail()
         detail.eyebrow:SetText("STRATAGEM")
         detail.title:SetText("Pick a guide")
         detail.meta:SetText("BiS before speed")
-        detail.blurb:SetText("Click Open on a guide in the list. Continue on the right starts the highlighted one.")
+        detail.blurb:SetText("Leveling opens the route for your level. The other categories are lists. Click Open, then Continue.")
         detail.zone:SetText("")
         detail.hidden:SetText("")
         detail.bar:SetPercent(0)
@@ -1222,11 +1271,17 @@ function SG.UI.RefreshDetail()
             detail.eyebrow:SetText("LEVEL BIS")
         elseif step.bisFrom == "upgrade" then
             detail.eyebrow:SetText("UPGRADE")
+        elseif step.optional then
+            detail.eyebrow:SetText("OPTIONAL")
         else
             detail.eyebrow:SetText(guide.title)
         end
         detail.title:SetText(step.title)
-        detail.meta:SetText(string.format("%s    %d-%d", SG.SideName(guide.side), guide.min or 1, guide.max or 60))
+        if guide.scoreText and guide.scoreText ~= "" then
+            detail.meta:SetText(guide.scoreText)
+        else
+            detail.meta:SetText(string.format("%s    %d-%d", SG.SideName(guide.side), guide.min or 1, guide.max or 60))
+        end
         detail.blurb:SetText(step.text or "")
         local dist = SG.Nav.FormatDistance(SG.Nav.Measure(step))
         local coord = SG.Nav.CoordText(step)
@@ -1241,10 +1296,16 @@ function SG.UI.RefreshDetail()
             local was = SG.Engine.IsDone(guide, step.index)
             SG.Engine.Mark(guide, step.index, not was)
             if not was then
-                local nextIndex = SG.Engine.CurrentIndex(guide)
+                local nextIndex = step.index + 1
+                while guide.steps[nextIndex] and not guide.steps[nextIndex].visible do
+                    nextIndex = nextIndex + 1
+                end
+                if not guide.steps[nextIndex] then nextIndex = nil end
                 SG.state.stepIndex = nextIndex
                 if nextIndex and SG.Nav.following then
                     SG.Engine.Focus(guide, nextIndex, true)
+                elseif nextIndex then
+                    SG.Engine.Progress(guide.id).cursor = nextIndex
                 end
             end
             SG.UI.Refresh(false)
@@ -1312,6 +1373,12 @@ function SG.UI.Refresh(resetScroll)
     end
     SG.UI.factionButton:SetLabel(FactionLabel())
     SG.UI.RefreshTabs()
+
+    local direct = SG.UI.DirectId()
+    if direct and SG.Engine.Get(direct) and SG.state.tab ~= direct and SG.db.category ~= "options" then
+        SG.state.tab = direct
+        SG.db.selected = direct
+    end
 
     local optionsOn = SG.db.category == "options"
     if optionsOn then

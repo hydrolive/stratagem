@@ -104,14 +104,16 @@ function SG.Tracker.Create()
     frame:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Stratagem", 0.85, 0.7, 1)
-        GameTooltip:AddLine("Right-click to choose a guide.", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Right-click to open the leveling route.", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    local choose = SG.Widgets.Button(frame, "Choose a guide", "primary")
+    local choose = SG.Widgets.Button(frame, "Open the route", "primary")
     choose:SetPoint("BOTTOMLEFT", 12, 10)
     choose:SetPoint("BOTTOMRIGHT", -12, 10)
-    choose:SetScript("OnClick", function() SG.UI.Show() end)
+    choose:SetScript("OnClick", function()
+        if SG.UI.ShowGuides then SG.UI.ShowGuides() else SG.UI.Show() end
+    end)
     frame.choose = choose
 
     SG.Tracker.frame = frame
@@ -149,8 +151,8 @@ function SG.Tracker.Update()
         steps(false)
         frame.count:SetText("")
         frame.step:SetTextColor(SG.RGB(SG.Theme.text))
-        frame.step:SetText("Choose a guide to follow.")
-        frame.coord:SetText("Open is on each guide in the list.")
+        frame.step:SetText("The leveling route is not ready yet.")
+        frame.coord:SetText("Open the route once the addon has finished loading.")
         frame.bar:SetPercent(0)
         SG.Tracker.updating = false
         if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end

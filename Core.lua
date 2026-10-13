@@ -43,7 +43,7 @@ SG.DB_DEFAULTS = {
     favorites = {},
     recent = {},
     tabs = {},
-    category = "all",
+    category = "leveling",
     selected = nil,
 }
 
@@ -245,6 +245,7 @@ function SG.InitDB()
     if type(SG.db.recent) ~= "table" then SG.db.recent = {} end
     if type(SG.db.tabs) ~= "table" then SG.db.tabs = {} end
     if type(SG.char.progress) ~= "table" then SG.char.progress = {} end
+    if SG.db.category == "all" or SG.db.category == nil then SG.db.category = "leveling" end
 end
 
 function SG.OnLogin()
@@ -261,22 +262,50 @@ function SG.OnLogin()
     SG.Specs.Detect()
     SG.BiS.Refresh()
     if SG.Gear and SG.Gear.Start then SG.Gear.Start() end
+    local previous = SG.char.active
     SG.Engine.Rebuild()
     SG.RefreshQuestCache()
     if SG.db.options.autoAdvance then
         SG.Engine.SyncAll(true)
     end
-    local active = SG.char.active and SG.Engine.Get(SG.char.active)
-    if active then
-        SG.Engine.CatchUp(active, false)
+    local active = previous and SG.Engine.Get(previous)
+    local route
+    if SG.Route and SG.Route.ActiveId then
+        route = SG.Engine.Get(SG.Route.ActiveId())
+    end
+    -- Leveling is one route. A saved dungeon or profession must not keep the arrow
+    -- while the window is showing that route.
+    local assigned = false
+    if SG.db.category == "leveling" then
+        if route then
+            assigned = not active
+            SG.char.active = route.id
+            SG.db.selected = route.id
+            active = route
+        end
+    elseif not active and route then
+        assigned = true
+        SG.char.active = route.id
+        SG.db.selected = route.id
+        SG.db.category = "leveling"
+        active = route
+    end
+    if active then SG.Engine.CatchUp(active, false) end
+    SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
+    if SG.db.category == "bis" then
+        SG.state.tab = "bis-60"
+    elseif SG.db.category == "leveling" and active then
+        SG.state.tab = active.id
     end
     SG.UI.Create()
     SG.Minimap.Create()
     SG.Tracker.Create()
     SG.Arrow.Create()
-    if not SG.char.active then
-        SG.UI.Show()
+    if active and SG.db.category ~= "bis" then
+        local index = SG.Engine.ShownIndex(active)
+        if index then SG.Engine.Focus(active, index, true) end
     end
+    if assigned then SG.UI.Show() end
     local events = {
         "QUEST_LOG_UPDATE", "QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED",
         "GET_ITEM_INFO_RECEIVED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
@@ -383,6 +412,18 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1)
         SG.InitDB()
     elseif event == "ADDON_LOADED" and arg1 == "QuestieDB" then
         if SG.classToken and SG.Gear and SG.Gear.Start then SG.Gear.Start() end
+    elseif event == "ADDON_LOADED" and SG.classToken and (
+        arg1 == "NaowhForever" or arg1 == "NaowhForever_BiS" or arg1 == "NaowhForever_DungeonJournal"
+        or arg1 == "NaowwahForever" or arg1 == "NaowwahForever_BiS"
+    ) then
+        if SG.BiS and SG.BiS.Refresh then SG.BiS.Refresh() end
+        if SG.Engine and SG.Engine.Rebuild then
+            SG.Engine.Rebuild()
+            if SG.db and SG.db.options.autoAdvance then SG.Engine.SyncAll(true) end
+            local active = SG.Engine.Active and SG.Engine.Active()
+            if active then SG.Engine.PlaceCursor(active) end
+            if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
+        end
     elseif event == "PLAYER_LOGIN" then
         SG.OnLogin()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
@@ -392,6 +433,9 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1)
         if SG.Engine and SG.Engine.OnQuestUpdate then SG.Engine.OnQuestUpdate() end
     elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "PLAYER_LEVEL_UP" then
         if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
+        if event == "PLAYER_LEVEL_UP" and SG.Engine and SG.Engine.Active and SG.Engine.AimForward then
+            SG.Engine.AimForward(SG.Engine.Active())
+        end
         if event == "PLAYER_LEVEL_UP" and SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
