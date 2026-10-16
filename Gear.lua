@@ -14,6 +14,8 @@ SG.Gear = {
     byQuest = {},
     curve = {},
     facts = {},
+    loads = {},
+    loadAt = {},
     bestCache = {},
     ready = false,
 }
@@ -216,8 +218,10 @@ function SG.Gear.Fact(itemID)
         end
         SG.Gear.facts[itemID] = row
     end
+    -- Quiet. Fact runs for the whole catalog. ItemName would ask the client
+    -- for every missing name, and that queue is what stuck the gear list.
     if not row.name and SG.ItemName then
-        local name = SG.ItemName(itemID)
+        local name = SG.ItemName(itemID, true)
         if name then row.name = name end
     end
     if row.ilvl == 0 and GetItemInfo and not row.asked then
@@ -650,8 +654,33 @@ local function RefreshSoon()
     end)
 end
 
-function SG.Gear.OnItem(itemID)
-    if itemID and SG.Gear.facts then SG.Gear.facts[itemID] = nil end
+-- While a tab is waiting on the client, keep filtering so the next batch is
+-- asked even when no item event arrives.
+local function PollLoads()
+    if SG.Gear.loadPoll then return end
+    SG.Gear.loadPoll = true
+    SG.After(0.6, function()
+        SG.Gear.loadPoll = false
+        if not SG.db or not SG.Gear.ready then return end
+        RefreshSoon()
+    end)
+end
+
+-- success comes from GET_ITEM_INFO_RECEIVED. Only an item this addon asked
+-- for refreshes the list. A miss is remembered so the same id is not asked again.
+function SG.Gear.OnItem(itemID, success)
+    local loads = SG.Gear.loads
+    if not itemID or type(loads) ~= "table" then return end
+    local state = loads[itemID]
+    if state ~= "ask" and state ~= "miss" then return end
+    if success == true then
+        loads[itemID] = "ok"
+    elseif success == false then
+        loads[itemID] = "miss"
+    elseif state == "miss" then
+        return
+    end
+    if SG.Gear.facts then SG.Gear.facts[itemID] = nil end
     SG.Gear.curveDirty = true
     if SG.Gear.ready then RefreshSoon() end
 end
@@ -676,6 +705,8 @@ function SG.Gear.Start()
     if SG.Gear.scanning or SG.Gear.scanned then return end
     IndexCatalog()
     SG.Gear.facts = {}
+    SG.Gear.loads = {}
+    SG.Gear.loadAt = {}
     SG.Gear.byVendor = {}
     SG.Gear.ready = false
     local ItemDB = _G.ItemDB
@@ -1065,6 +1096,7 @@ local function BlankStep()
 end
 
 function SG.Gear.Build(side)
+    SG.Gear.deferLoads = true
     local alliance = side == "A"
     local guide = {
         id = alliance and "gear-a" or "gear-h",
@@ -1104,6 +1136,7 @@ function SG.Gear.Build(side)
         guide.steps = steps
         note.index = 1
         note.guide = guide.id
+        SG.Gear.deferLoads = false
         return guide
     end
 
@@ -1465,6 +1498,7 @@ function SG.Gear.Build(side)
     guide.max = maxLevel or 60
     guide.questCount = quests
     guide.visibleQuests = quests
+    SG.Gear.deferLoads = false
     return guide
 end
 
@@ -1495,28 +1529,82 @@ local function StatAmount(stats, token)
     return amount
 end
 
--- known is false when the client has not cached the item. A cached item with
--- none of this spec's stats is 0, not unknown.
-local function SpecValue(itemID)
-    if not GetItemStats or not GetItemInfo or not itemID then return nil, false end
+-- One request per item. "ask" is in flight, "ok" came back, "miss" will not.
+-- The gear list only waits on "ask". A miss is left off the list.
+local LOAD_WAIT = 8
+local LOAD_BUDGET = 48
+
+function SG.Gear.AskItem(itemID)
+    if not itemID or SG.Gear.deferLoads then return end
+    local loads = SG.Gear.loads
+    if type(loads) ~= "table" then
+        loads = {}
+        SG.Gear.loads = loads
+    end
+    local state = loads[itemID]
+    if state == "ask" or state == "ok" or state == "miss" then return end
+    if not C_Item or not C_Item.RequestLoadItemDataByID then
+        loads[itemID] = "miss"
+        return
+    end
+    local budget = SG.Gear.loadBudget
+    if type(budget) == "number" and budget <= 0 then return end
+    if type(budget) == "number" then SG.Gear.loadBudget = budget - 1 end
+    loads[itemID] = "ask"
+    if type(SG.Gear.loadAt) ~= "table" then SG.Gear.loadAt = {} end
+    if GetTime then SG.Gear.loadAt[itemID] = GetTime() end
+    C_Item.RequestLoadItemDataByID(itemID)
+end
+
+local function GaveUp(itemID)
+    local loads = SG.Gear.loads
+    local state = loads and loads[itemID]
+    if state == "miss" then return true end
+    if state ~= "ask" then return false end
+    local at = SG.Gear.loadAt and SG.Gear.loadAt[itemID]
+    if not at or not GetTime then return false end
+    if (GetTime() - at) < LOAD_WAIT then return false end
+    loads[itemID] = "miss"
+    return true
+end
+
+-- known is false while a request is in flight. failed is true when the client
+-- will not return the item. A cached item with none of this spec's stats is 0.
+local function SpecValue(itemID, allowAsk)
+    if allowAsk == nil then allowAsk = true end
+    if not GetItemStats or not GetItemInfo or not itemID then return nil, false, true end
     local spec = SG.Specs and SG.Specs.Selected()
     local tokens = spec and SPEC_STATS[spec]
-    if not tokens then return nil, false end
+    if not tokens then return nil, false, false end
     local name, link = GetItemInfo(itemID)
+    local state = SG.Gear.loads and SG.Gear.loads[itemID]
     if not name or not link then
-        local fact = SG.Gear.facts and SG.Gear.facts[itemID]
-        if fact and not fact.loadAsked then
-            fact.loadAsked = true
-            if C_Item and C_Item.RequestLoadItemDataByID then
-                C_Item.RequestLoadItemDataByID(itemID)
+        if state == "miss" or GaveUp(itemID) then return nil, false, true end
+        if state == "ok" then
+            local at = SG.Gear.loadAt and SG.Gear.loadAt[itemID]
+            if not at or not GetTime or (GetTime() - at) >= LOAD_WAIT then
+                if SG.Gear.loads then SG.Gear.loads[itemID] = "miss" end
+                return nil, false, true
             end
-        elseif not fact and C_Item and C_Item.RequestLoadItemDataByID then
-            C_Item.RequestLoadItemDataByID(itemID)
+            return nil, false, false
         end
-        return nil, false
+        if allowAsk then SG.Gear.AskItem(itemID) end
+        state = SG.Gear.loads and SG.Gear.loads[itemID]
+        if state == "miss" then return nil, false, true end
+        return nil, false, false
     end
     local stats = GetItemStats(link)
-    if type(stats) ~= "table" then return nil, false end
+    if type(stats) ~= "table" then
+        if state == "miss" or GaveUp(itemID) then return 0, true, false end
+        if state == "ok" then
+            local at = SG.Gear.loadAt and SG.Gear.loadAt[itemID]
+            if not at or not GetTime or (GetTime() - at) >= LOAD_WAIT then return 0, true, false end
+            return nil, false, false
+        end
+        if allowAsk then SG.Gear.AskItem(itemID) end
+        return nil, false, false
+    end
+    if state == "ask" and SG.Gear.loads then SG.Gear.loads[itemID] = "ok" end
     local score = 0
     for i = 1, #tokens do
         score = score + StatAmount(stats, tokens[i]) * (4 - i)
@@ -1534,7 +1622,7 @@ local function SpecValue(itemID)
             score = score + StatAmount(stats, "ITEM_MOD_ATTACK_POWER_SHORT") * 2
         end
     end
-    return score, true
+    return score, true, false
 end
 
 -- 0 none, 1 BoP, 2 BoE, 3 BoU, 4 quest. Nil means the client has not said.
@@ -1542,16 +1630,11 @@ local function BindOf(itemID)
     if not itemID or not GetItemInfo then return nil end
     local fact = SG.Gear.facts and SG.Gear.facts[itemID]
     if fact and fact.bindKnown then return fact.bind end
+    if GaveUp(itemID) then return nil end
     local name, _, _, _, _, _, _, _, _, _, _, _, _, bind = GetItemInfo(itemID)
     if not name then
-        if fact and not fact.loadAsked then
-            fact.loadAsked = true
-            if C_Item and C_Item.RequestLoadItemDataByID then
-                C_Item.RequestLoadItemDataByID(itemID)
-            end
-        elseif not fact and C_Item and C_Item.RequestLoadItemDataByID then
-            C_Item.RequestLoadItemDataByID(itemID)
-        end
+        local state = SG.Gear.loads and SG.Gear.loads[itemID]
+        if state ~= "ok" and state ~= "miss" then SG.Gear.AskItem(itemID) end
         return nil
     end
     if type(bind) ~= "number" then return nil end
@@ -1681,7 +1764,8 @@ local function CollectHeld(class, playerLevel)
         if not fact or not fact.slot then return end
         if (fact.req or 1) > playerLevel then return end
         if not SG.Gear.Usable(class, fact, playerLevel) then return end
-        local score, known = SpecValue(itemID)
+        local score, known, failed = SpecValue(itemID)
+        if failed then return end
         local list = bySlot[fact.slot]
         if not list then
             list = {}
@@ -1899,7 +1983,24 @@ local function PreferPick(prev, pick)
     return false
 end
 
-local function Survey(step, class, playerLevel, held)
+-- False when this step cannot show on the open tab, so its items are not requested.
+local function MaybeThisTab(step, tab, profs)
+    local kind = step.sourceKind
+    if kind == "quest" then return tab == "quest" end
+    if kind == "dungeon" then return tab == "world" end
+    if kind == "vendor" then return tab == "vendor" end
+    if kind == "auction" then return tab == "auction" end
+    if kind == "craft" then
+        if tab == "profession" then
+            return step.profId and profs and profs[step.profId] and true or false
+        end
+        return tab == "auction"
+    end
+    if kind == "world" then return tab == "world" or tab == "auction" end
+    return false
+end
+
+local function Survey(step, class, playerLevel, held, tab, profs)
     local ids = IdsOf(step)
     local result = { anyBetter = false, wearable = false, ownedOpen = false, pending = false, now = {} }
     local soon = (step.level or 1) <= playerLevel + AHEAD
@@ -1909,65 +2010,72 @@ local function Survey(step, class, playerLevel, held)
     for i = 1, #ids do
         local fact = SG.Gear.Fact(ids[i])
         local wear = fact and WearLevel(class, fact) or nil
-        if fact and fact.slot and (fact.ilvl or 0) > 0 and wear then
-            result.wearable = true
-            local score, known = SpecValue(fact.itemID)
-            local tierLevel = playerLevel
-            if wear > tierLevel then tierLevel = wear end
-            local cand = {
-                itemID = fact.itemID,
-                score = score or 0,
-                known = known and true or false,
-                armor = ArmorTier(class, fact, tierLevel),
-                ilvl = fact.ilvl or 0,
-            }
-            local bar, barPending = BarFor(fact.slot, slots[fact.slot])
-            if barPending or not known then result.pending = true end
-            local beats = Beats(cand, bar)
-            if beats == nil then result.pending = true end
-            local usableNow = SG.Gear.Usable(class, fact, playerLevel) and (fact.req or 1) <= playerLevel
-            local now = usableNow and (step.level or 1) <= playerLevel and known
-            if now then
-                result.now[#result.now + 1] = {
-                    slot = fact.slot, score = cand.score, armor = cand.armor, ilvl = fact.ilvl,
+        local reach = soon and wear and wear <= playerLevel + AHEAD
+        local ask = reach and MaybeThisTab(step, tab, profs)
+        local seen = fact and SG.Gear.loads and SG.Gear.loads[fact.itemID]
+        -- Other tabs are scored only after this addon has already asked for them.
+        if fact and fact.slot and (fact.ilvl or 0) > 0 and reach and (ask or seen == "ok" or seen == "ask") then
+            local score, known, failed = SpecValue(fact.itemID, ask)
+            if not failed and known then
+                result.wearable = true
+                local tierLevel = playerLevel
+                if wear > tierLevel then tierLevel = wear end
+                local cand = {
+                    itemID = fact.itemID,
+                    score = score or 0,
+                    known = true,
+                    armor = ArmorTier(class, fact, tierLevel),
+                    ilvl = fact.ilvl or 0,
                 }
-            end
-            if beats then
-                result.anyBetter = true
-                better = better + 1
-                local owned = counts[fact.itemID] or 0
-                local wearableCopies = 0
-                local list = slots[fact.slot]
-                if list then
-                    for n = 1, #list do
-                        if list[n].itemID == fact.itemID then
-                            wearableCopies = wearableCopies + 1
+                local bar, barPending = BarFor(fact.slot, slots[fact.slot])
+                if barPending then result.pending = true end
+                local beats = Beats(cand, bar)
+                if beats == nil then result.pending = true end
+                local usableNow = SG.Gear.Usable(class, fact, playerLevel) and (fact.req or 1) <= playerLevel
+                local now = usableNow and (step.level or 1) <= playerLevel and known
+                if now then
+                    result.now[#result.now + 1] = {
+                        slot = fact.slot, score = cand.score, armor = cand.armor, ilvl = fact.ilvl,
+                    }
+                end
+                if beats then
+                    result.anyBetter = true
+                    better = better + 1
+                    local owned = counts[fact.itemID] or 0
+                    local wearableCopies = 0
+                    local list = slots[fact.slot]
+                    if list then
+                        for n = 1, #list do
+                            if list[n].itemID == fact.itemID then
+                                wearableCopies = wearableCopies + 1
+                            end
                         end
                     end
+                    local need = (fact.slot == 11 or fact.slot == 13) and 2 or 1
+                    -- A copy you cannot wear yet still means you already have the item.
+                    -- Wearable copies fill a slot only when both ring or trinket slots are covered.
+                    local filled = owned > wearableCopies or wearableCopies >= need
+                    if filled then
+                        ownedBetter = ownedBetter + 1
+                    end
+                    if not filled then
+                        local pick = {
+                            fact = fact,
+                            itemID = fact.itemID,
+                            worn = bar and bar.ilvl or 0,
+                            wornName = bar and bar.name or nil,
+                            score = cand.score,
+                            armor = cand.armor,
+                            ilvl = fact.ilvl,
+                            now = now and true or false,
+                            empty = not bar,
+                            pair = (fact.slot == 11 or fact.slot == 13) and true or false,
+                        }
+                        if PreferPick(result.pick, pick) then result.pick = pick end
+                    end
                 end
-                local need = (fact.slot == 11 or fact.slot == 13) and 2 or 1
-                -- A copy you cannot wear yet still means you already have the item.
-                -- Wearable copies fill a slot only when both ring or trinket slots are covered.
-                local filled = owned > wearableCopies or wearableCopies >= need
-                if filled then
-                    ownedBetter = ownedBetter + 1
-                end
-                local inReach = wear <= playerLevel + AHEAD
-                if soon and inReach and not filled then
-                    local pick = {
-                        fact = fact,
-                        itemID = fact.itemID,
-                        worn = bar and bar.ilvl or 0,
-                        wornName = bar and bar.name or nil,
-                        score = cand.score,
-                        armor = cand.armor,
-                        ilvl = fact.ilvl,
-                        now = now and true or false,
-                        empty = not bar,
-                        pair = (fact.slot == 11 or fact.slot == 13) and true or false,
-                    }
-                    if PreferPick(result.pick, pick) then result.pick = pick end
-                end
+            elseif ask and not failed then
+                result.pending = true
             end
         end
     end
@@ -2040,6 +2148,9 @@ end
 
 function SG.Gear.Filter(guide)
     if not guide or not guide.gear or not guide.steps then return end
+    SG.Gear.deferLoads = false
+    -- Worn and bag pieces are few. Ask for those before the per-pass cap.
+    SG.Gear.loadBudget = nil
     local class = SG.classToken
     local playerLevel = PlayerLevel()
     local row
@@ -2100,6 +2211,7 @@ function SG.Gear.Filter(guide)
     local ownedGear = class and CollectHeld(class, playerLevel) or nil
     local profs = PlayerProfessions()
     local tab = GearTab()
+    SG.Gear.loadBudget = LOAD_BUDGET
     local specName = "this spec"
     if SG.Specs and SG.Specs.Label and SG.Specs.Selected then
         local label = SG.Specs.Label(SG.Specs.Selected())
@@ -2110,7 +2222,7 @@ function SG.Gear.Filter(guide)
     for i = 1, #guide.steps do
         local step = guide.steps[i]
         if not step.gearNote and class then
-            local info = Survey(step, class, playerLevel, ownedGear)
+            local info = Survey(step, class, playerLevel, ownedGear, tab, profs)
             surveyed[i] = info
             for n = 1, #info.now do
                 local item = info.now[n]
@@ -2145,7 +2257,9 @@ function SG.Gear.Filter(guide)
                 mark(i, step, "wait")
             elseif info.pending and not pick then
                 if AssignTab(step, profs) and OnGearTab(step, tab) then
-                    waiting = true
+                    if (step.level or 1) <= playerLevel + AHEAD then
+                        waiting = true
+                    end
                     mark(i, step, "wait")
                 elseif step.gearTab then
                     mark(i, step, "aside")
@@ -2234,6 +2348,8 @@ function SG.Gear.Filter(guide)
         local held = guide.steps[row.hold]
         if not held or not held.visible then row.hold = nil end
     end
+    SG.Gear.loadBudget = nil
+    if waiting then PollLoads() end
 end
 
 function SG.Gear.FilterGuides()

@@ -127,7 +127,7 @@ function SG.FactionFilter()
     return SG.playerSide or "H"
 end
 
-function SG.ItemName(itemID)
+function SG.ItemName(itemID, quiet)
     if not itemID then return nil end
     local name, link, quality, _, _, _, _, _, _, texture
     if C_Item and C_Item.GetItemInfo then
@@ -135,8 +135,12 @@ function SG.ItemName(itemID)
     elseif GetItemInfo then
         name, link, quality, _, _, _, _, _, _, texture = GetItemInfo(itemID)
     end
-    if not name and C_Item and C_Item.RequestLoadItemDataByID then
-        C_Item.RequestLoadItemDataByID(itemID)
+    if not name and not quiet then
+        if SG.Gear and SG.Gear.AskItem then
+            SG.Gear.AskItem(itemID)
+        elseif C_Item and C_Item.RequestLoadItemDataByID then
+            C_Item.RequestLoadItemDataByID(itemID)
+        end
     end
     return name, link, quality, texture
 end
@@ -549,7 +553,7 @@ BINDING_NAME_STRATAGEM_TOGGLE = "Toggle Stratagem"
 SG.eventFrame = CreateFrame("Frame")
 SG.eventFrame:RegisterEvent("ADDON_LOADED")
 SG.eventFrame:RegisterEvent("PLAYER_LOGIN")
-SG.eventFrame:SetScript("OnEvent", function(_, event, arg1)
+SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "ADDON_LOADED" and arg1 == SG.name then
         SG.InitDB()
     elseif event == "ADDON_LOADED" and arg1 == "QuestieDB" then
@@ -576,7 +580,7 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1)
         SG.OnLogin()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
         if SG.UI.OnItem then SG.UI.OnItem(arg1) end
-        if SG.Gear and SG.Gear.OnItem then SG.Gear.OnItem(arg1) end
+        if SG.Gear and SG.Gear.OnItem then SG.Gear.OnItem(arg1, arg2) end
     elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED" then
         if SG.Engine and SG.Engine.OnQuestUpdate then SG.Engine.OnQuestUpdate() end
     elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "PLAYER_LEVEL_UP"
