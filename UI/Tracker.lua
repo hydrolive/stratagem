@@ -93,6 +93,8 @@ function SG.Tracker.Create()
     coord:SetPoint("TOPLEFT", 12, -78)
     coord:SetPoint("TOPRIGHT", -12, -78)
     coord:SetJustifyH("LEFT")
+    coord:SetWordWrap(true)
+    coord:SetHeight(16)
     coord:SetTextColor(SG.RGB(SG.Theme.muted))
     frame.coord = coord
 
@@ -405,8 +407,20 @@ function SG.Tracker.Update()
         if step.gearName and step.gearName ~= "" and step.kind ~= "turnin" then
             coord = step.gearName .. (coord ~= "" and ("    " .. coord) or "")
         end
-        frame.coord:SetText(dist and (coord .. "    " .. dist) or coord)
-        y = y + 18
+        local line = dist and (coord .. "    " .. dist) or coord
+        local extra = 0
+        if step.dropLine and step.dropLine ~= "" then
+            if #step.dropLine > 42 then
+                if line ~= "" then line = line .. "\n" end
+                line = line .. step.dropLine
+                extra = 32
+            else
+                line = line .. (line ~= "" and "    " or "") .. step.dropLine
+            end
+        end
+        frame.coord:SetHeight(16 + extra)
+        frame.coord:SetText(line)
+        y = y + 18 + extra
         local rows, heights, contentH = nil, nil, 0
         local rewardStep = step.kind == "turnin" or (step.kind == "gear" and step.rewards and step.rewards[1])
         if step.kind == "complete" or step.kind == "run" then

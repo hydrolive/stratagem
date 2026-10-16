@@ -415,11 +415,51 @@ function SG.UI.Create()
     steps:SetPoint("TOPLEFT", tabbar, "BOTTOMLEFT", 0, 0)
     steps:SetPoint("BOTTOMRIGHT")
     steps:Hide()
+    local gearBar = CreateFrame("Frame", nil, steps)
+    gearBar:SetPoint("TOPLEFT", 8, -4)
+    gearBar:SetPoint("TOPRIGHT", -8, -4)
+    gearBar:SetHeight(28)
+    gearBar:Hide()
+    local gearTabs = {
+        { id = "quest", label = "Quests", width = 78 },
+        { id = "profession", label = "Profession", width = 104 },
+        { id = "auction", label = "Auction House", width = 128 },
+        { id = "world", label = "World Drops", width = 116 },
+    }
+    local gearButtons = {}
+    local previous
+    for i = 1, #gearTabs do
+        local info = gearTabs[i]
+        local button = SG.Widgets.Button(gearBar, info.label, "ghost")
+        button.gearTab = info.id
+        button:SetSize(info.width, 28)
+        if i == 1 then
+            button:SetPoint("LEFT", 0, 0)
+        else
+            button:SetPoint("LEFT", previous, "RIGHT", 6, 0)
+        end
+        button:SetScript("OnClick", function()
+            if not SG.db then return end
+            SG.db.gearTab = info.id
+            local active = SG.Engine and SG.Engine.Active and SG.Engine.Active()
+            if active and active.gear and SG.Gear and SG.Gear.Filter then
+                SG.Gear.Filter(active)
+                if SG.Engine.PlaceCursor then SG.Engine.PlaceCursor(active) end
+            end
+            SG.UI.Refresh(true)
+            if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+        end)
+        gearButtons[i] = button
+        previous = button
+    end
+    SG.UI.gearBar = gearBar
+    SG.UI.gearTabButtons = gearButtons
     local stepScroll = SG.Widgets.Scroll(steps)
     stepScroll:SetPoint("TOPLEFT", 0, -4)
     stepScroll:SetPoint("BOTTOMRIGHT")
     SG.UI.steps = steps
     SG.UI.stepScroll = stepScroll
+    SG.UI.stepScrollOffset = -4
 
     local options = CreateFrame("Frame", nil, center)
     options:SetPoint("TOPLEFT", tabbar, "BOTTOMLEFT", 0, 0)
@@ -1177,7 +1217,6 @@ function SG.UI.RefreshSteps(resetScroll)
             row.done = SG.Engine.IsDone(guide, i)
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y)
-            row:SetSize(math.max(40, width - 16), 48)
             local prefix = row.done and "Done  " or ""
             local chained = SG.HasChain and SG.HasChain(step)
             row.title:ClearAllPoints()
@@ -1209,7 +1248,11 @@ function SG.UI.RefreshSteps(resetScroll)
             if step.x and step.y then
                 bits[#bits + 1] = string.format("%.1f, %.1f", step.x, step.y)
             end
+            row.sub:SetWordWrap(true)
             row.sub:SetText(table.concat(bits, "   "))
+            local tall = step.dropLine and #step.dropLine > 42
+            row:SetSize(math.max(40, width - 16), tall and 64 or 48)
+            row.sub:SetHeight(tall and 32 or 16)
             row.bisFrom = step.bisFrom
             if step.bisFrom == "level" then
                 row.sub:SetTextColor(SG.RGB(T.gold))
@@ -1219,7 +1262,7 @@ function SG.UI.RefreshSteps(resetScroll)
                 row.sub:SetTextColor(SG.RGB(T.muted))
             end
             SG.UI.PaintStep(row)
-            y = y + 52
+            y = y + (step.dropLine and #step.dropLine > 42 and 68 or 52)
         end
     end
     content:SetHeight(math.max(y + 12, scroll:GetHeight() + 1))
@@ -1581,6 +1624,25 @@ function SG.UI.Refresh(resetScroll)
         SG.UI.options:Hide()
         SG.UI.steps:Show()
         SG.db.selected = SG.state.tab
+        local shown = SG.Engine.Get(SG.state.tab)
+        local gearOn = shown and shown.gear and true or false
+        if SG.UI.gearBar then
+            if gearOn then SG.UI.gearBar:Show() else SG.UI.gearBar:Hide() end
+            local offset = gearOn and -36 or -4
+            if SG.UI.stepScrollOffset ~= offset then
+                SG.UI.stepScrollOffset = offset
+                SG.UI.stepScroll:ClearAllPoints()
+                SG.UI.stepScroll:SetPoint("TOPLEFT", 0, offset)
+                SG.UI.stepScroll:SetPoint("BOTTOMRIGHT")
+            end
+            local buttons = SG.UI.gearTabButtons or {}
+            local selected = SG.db.gearTab or "quest"
+            for i = 1, #buttons do
+                local button = buttons[i]
+                button.kind = (button.gearTab == selected) and "primary" or "ghost"
+                button:Paint(false)
+            end
+        end
         SG.UI.RefreshSteps(resetScroll)
     else
         SG.state.tab = "home"

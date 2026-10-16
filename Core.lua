@@ -45,6 +45,7 @@ SG.DB_DEFAULTS = {
     tabs = {},
     category = "leveling",
     selected = nil,
+    gearTab = "quest",
 }
 
 SG.CHAR_DEFAULTS = {
@@ -53,6 +54,7 @@ SG.CHAR_DEFAULTS = {
     autoDetect = true,
     active = nil,
     progress = {},
+    kills = {},
 }
 
 function SG.CopyDefaults(dst, src)
@@ -381,7 +383,11 @@ function SG.InitDB()
     if type(SG.db.recent) ~= "table" then SG.db.recent = {} end
     if type(SG.db.tabs) ~= "table" then SG.db.tabs = {} end
     if type(SG.char.progress) ~= "table" then SG.char.progress = {} end
+    if type(SG.char.kills) ~= "table" then SG.char.kills = {} end
     if SG.db.category == "all" or SG.db.category == nil then SG.db.category = "leveling" end
+    if SG.db.gearTab ~= "quest" and SG.db.gearTab ~= "profession" and SG.db.gearTab ~= "auction" and SG.db.gearTab ~= "world" then
+        SG.db.gearTab = "quest"
+    end
 end
 
 function SG.OnLogin()
@@ -445,7 +451,7 @@ function SG.OnLogin()
     local events = {
         "QUEST_LOG_UPDATE", "QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED",
         "GET_ITEM_INFO_RECEIVED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
-        "ZONE_CHANGED_NEW_AREA",
+        "BAG_UPDATE", "SKILL_LINES_CHANGED", "ZONE_CHANGED_NEW_AREA",
     }
     for i = 1, #events do
         SG.eventFrame:RegisterEvent(events[i])
@@ -547,7 +553,9 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == SG.name then
         SG.InitDB()
     elseif event == "ADDON_LOADED" and arg1 == "QuestieDB" then
+        if SG.Gear then SG.Gear.drops = nil end
         if SG.classToken and SG.Gear and SG.Gear.Start then SG.Gear.Start() end
+        if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
     elseif event == "ADDON_LOADED" and SG.classToken and (
         arg1 == "NaowhForever" or arg1 == "NaowhForever_BiS" or arg1 == "NaowhForever_DungeonJournal"
         or arg1 == "NaowwahForever" or arg1 == "NaowwahForever_BiS"
@@ -567,7 +575,8 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1)
         if SG.Gear and SG.Gear.OnItem then SG.Gear.OnItem(arg1) end
     elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED" then
         if SG.Engine and SG.Engine.OnQuestUpdate then SG.Engine.OnQuestUpdate() end
-    elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "PLAYER_LEVEL_UP" then
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "PLAYER_LEVEL_UP"
+        or event == "BAG_UPDATE" or event == "SKILL_LINES_CHANGED" then
         if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
         if event == "PLAYER_LEVEL_UP" and SG.Engine and SG.Engine.Active and SG.Engine.AimForward then
             SG.Engine.AimForward(SG.Engine.Active())
