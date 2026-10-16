@@ -809,9 +809,19 @@ function SG.Engine.Rebuild()
         local def = data[i]
         if not def.weave then add(def) end
     end
-    if SG.Route and SG.Route.Leveling then
-        add(SG.Route.Leveling("H"))
-        add(SG.Route.Leveling("A"))
+    -- Gear is the open guide. Zone sources stay in Guides.lua and are not woven
+    -- into a route the player has to follow.
+    if SG.Gear and SG.Gear.Build then
+        local function addGear(side)
+            local guide = SG.Gear.Build(side)
+            SG.Engine.guides[#SG.Engine.guides + 1] = guide
+            SG.Engine.byId[guide.id] = guide
+            if SG.Engine.AlignProgress then SG.Engine.AlignProgress(guide) end
+            if SG.Gear.Apply then SG.Gear.Apply(guide) end
+            if SG.Gear.Filter then SG.Gear.Filter(guide) end
+        end
+        addGear("H")
+        addGear("A")
     end
     if SG.Route and SG.Route.Endgame then
         local bis = SG.Route.Endgame()
@@ -853,6 +863,7 @@ function SG.Engine.AlignProgress(guide)
     row.steps = ids
     if same then return end
     row.done = {}
+    row.skip = {}
     row.cursor = nil
     row.hold = nil
 end
@@ -878,7 +889,12 @@ function SG.Engine.Stats(guide)
     if not guide then return 0, 0 end
     for i = 1, #guide.steps do
         local step = guide.steps[i]
-        if step.visible and not step.optional then
+        if guide.gear then
+            if not step.gearNote and (step.gearState == "show" or step.gearState == "done") then
+                required = required + 1
+                if step.gearState == "done" or SG.Engine.IsDone(guide, i) then done = done + 1 end
+            end
+        elseif step.visible and not step.optional then
             required = required + 1
             if SG.Engine.IsDone(guide, i) then done = done + 1 end
         end
@@ -888,6 +904,18 @@ end
 
 function SG.Engine.CurrentIndex(guide)
     if not guide then return nil end
+    if guide.gear then
+        local note
+        for i = 1, #guide.steps do
+            local step = guide.steps[i]
+            if step.visible and step.gearNote then
+                if not note then note = i end
+            elseif step.visible and not SG.Engine.IsDone(guide, i) then
+                return i
+            end
+        end
+        return note
+    end
     for i = 1, #guide.steps do
         local step = guide.steps[i]
         if step.visible and not step.optional and not SG.Engine.IsDone(guide, i) then
@@ -933,7 +961,7 @@ end
 local function AutoDone(step, completed, inLog, objectives)
     if step.kind == "accept" then return completed or inLog end
     if step.kind == "complete" then return completed or (inLog and objectives) end
-    if step.kind == "turnin" then return completed end
+    if step.kind == "turnin" or step.kind == "gear" then return completed end
     return false
 end
 
@@ -1098,6 +1126,7 @@ end
 function SG.Engine.CatchUp(guide, fromSelection)
     if not guide then return 0 end
     if SG.RefreshQuestCache then SG.RefreshQuestCache() end
+    if guide.gear and SG.Gear and SG.Gear.Filter then SG.Gear.Filter(guide) end
     local row = SG.Engine.Progress(guide.id)
     local before = row.cursor
     if fromSelection then row.hold = nil end
@@ -1127,6 +1156,7 @@ function SG.Engine.OnQuestUpdate()
         local active = SG.Engine.Get(SG.char.active)
         local before = active and SG.Engine.ShownIndex(active) or nil
         if SG.RefreshQuestCache then SG.RefreshQuestCache() end
+        if active and active.gear and SG.Gear and SG.Gear.Filter then SG.Gear.Filter(active) end
         if SG.db.options.autoAdvance then
             SG.Engine.SyncAll(true)
         elseif active then
@@ -1168,7 +1198,7 @@ function SG.Engine.Nudge(direction)
     local guide = SG.Engine.Active() or SG.Engine.Get(SG.db.selected)
     if not guide then
         if SG.UI and SG.UI.Show then SG.UI.Show() end
-        SG.Print("The leveling route is not ready yet.")
+        SG.Print("Gear is not ready yet.")
         return
     end
     local row = SG.Engine.Progress(guide.id)
@@ -1218,7 +1248,7 @@ function SG.Engine.WaypointCurrent()
     local guide = SG.Engine.Active() or SG.Engine.Get(SG.db.selected)
     if not guide then
         if SG.UI and SG.UI.Show then SG.UI.Show() end
-        SG.Print("The leveling route is not ready yet.")
+        SG.Print("Gear is not ready yet.")
         return
     end
     local index = SG.Engine.ShownIndex(guide) or SG.Engine.FirstVisible(guide)

@@ -1,6 +1,7 @@
--- Gear.lua: which reward to take for this class at this level.
--- Level BiS is the best piece you can wear in that slot right now.
+-- Gear.lua: which reward to take, and the Gear guide.
+-- Level BiS is the best piece you can get for that slot at this level.
 -- Upgrade is anything better than what you have on, when a stronger piece already exists.
+-- The Gear guide lists those pickups. It does not walk a zone route.
 -- Endgame rank lists do not decide the badge.
 local _, SG = ...
 if type(SG) ~= "table" then
@@ -189,14 +190,26 @@ function SG.Gear.Fact(itemID)
             if not row.classID and packed[1] then row.classID = packed[1] end
             if not row.subID and packed[2] then row.subID = packed[2] end
             if (not row.ilvl or row.ilvl == 0) and packed[3] and packed[3] > 0 then row.ilvl = packed[3] end
-            if packed[4] and packed[4] > 0 and (not row.req or row.req <= 1) then row.req = packed[4] end
+            if packed[4] and packed[4] > 0 and (not row.req or row.req <= 1) then
+                row.req = packed[4]
+                row.reqKnown = true
+            end
         end
         row.slot = equipLoc and EQUIP_SLOT[equipLoc] or nil
         local ItemDB = _G.ItemDB
         if ItemDB then
             if ItemDB.name then row.name = ItemDB.name(itemID) end
             if ItemDB.itemLevel then row.ilvl = ItemDB.itemLevel(itemID) or 0 end
-            if ItemDB.requiredLevel then row.req = ItemDB.requiredLevel(itemID) or 1 end
+            if ItemDB.requiredLevel then
+                local req = ItemDB.requiredLevel(itemID)
+                if type(req) == "number" and req > 0 then
+                    row.req = req
+                    row.reqKnown = true
+                elseif req == 0 then
+                    row.req = 1
+                    row.reqKnown = true
+                end
+            end
             if not row.classID and ItemDB.class then row.classID = ItemDB.class(itemID) end
             if not row.subID and ItemDB.subClass then row.subID = ItemDB.subClass(itemID) end
         end
@@ -210,7 +223,13 @@ function SG.Gear.Fact(itemID)
         row.asked = true
         local _, _, _, ilvl, req = GetItemInfo(itemID)
         if ilvl and ilvl > 0 then row.ilvl = ilvl end
-        if req and req > 0 then row.req = req end
+        if req and req > 0 then
+            row.req = req
+            row.reqKnown = true
+        elseif req == 0 then
+            row.req = 1
+            row.reqKnown = true
+        end
     end
     if row.equip == "INVTYPE_CLOAK" then row.subName = "Cloak" end
     if row.slot and SG.SLOT_NAME then row.slotName = SG.SLOT_NAME[row.slot] end
@@ -605,6 +624,7 @@ function SG.Gear.ApplyAll()
         SG.Gear.Apply(guides[i])
     end
     if SG.Route and SG.Route.Paint then SG.Route.Paint() end
+    if SG.Gear.FilterGuides then SG.Gear.FilterGuides() end
 end
 
 local refreshPending = false
@@ -620,6 +640,10 @@ local function RefreshSoon()
         end
         SG.Gear.bestCache = {}
         SG.Gear.ApplyAll()
+        local active = SG.Engine and SG.Engine.Active and SG.Engine.Active()
+        if active and active.gear and SG.Engine.PlaceCursor then
+            SG.Engine.PlaceCursor(active)
+        end
         if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
         if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
     end)
@@ -690,10 +714,836 @@ function SG.Gear.Start()
             SG.Gear.scanned = true
             SG.Gear.BuildCurve()
             SG.Gear.ready = true
-            SG.Gear.ApplyAll()
-            if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
-            if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+            if SG.Gear.RebuildGuides then
+                SG.Gear.RebuildGuides()
+            else
+                SG.Gear.ApplyAll()
+                if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
+                if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+            end
         end
     end
     SG.After(0, chunk)
+end
+
+-- How far ahead of the character a pickup still shows. Past that, it waits.
+local AHEAD = 3
+local SOURCE_SEP = " \194\183 "
+
+local GEAR_BLURB = "Upgrades you can pick up while you level. This does not choose a zone path. Each line is a quest reward, a dungeon drop, a craft, or a world drop that is better than what you have on, within a few levels. If you already have a better piece, or the quest is turned in, that line is marked done and left off. Level BiS is the best piece you can get at your level. Upgrade is still worth taking. Buy it on the auction house only when the source text says auction. A world drop is not an auction listing."
+
+local function Namespace()
+    return SG.BiS and SG.BiS.ns or nil
+end
+
+local function SpellName(spellID)
+    if not spellID then return nil end
+    if C_Spell and C_Spell.GetSpellName then
+        local name = C_Spell.GetSpellName(spellID)
+        if type(name) == "string" and name ~= "" then return name end
+    end
+    if GetSpellInfo then
+        local name = GetSpellInfo(spellID)
+        if type(name) == "string" and name ~= "" then return name end
+    end
+    return nil
+end
+
+local function PlayerLevel()
+    local level = UnitLevel and UnitLevel("player") or 1
+    if not level or level < 1 then level = 1 end
+    return level
+end
+
+local function ItemLabel(fact)
+    if fact and type(fact.name) == "string" and fact.name ~= "" then return fact.name end
+    if fact and fact.itemID then return "item " .. fact.itemID end
+    return "item"
+end
+
+-- Mail and plate open at 40. Usable already encodes that. The level returned
+-- here is the first level this class can wear the piece.
+local function WearLevel(class, fact)
+    if not class or not fact then return nil end
+    local req = fact.req or 1
+    if req < 1 then req = 1 end
+    if SG.Gear.Usable(class, fact, req) then return req end
+    if req < 40 and SG.Gear.Usable(class, fact, 40) then return 40 end
+    if SG.Gear.Usable(class, fact, 60) then return math.max(req, 40) end
+    return nil
+end
+
+local function Owns(itemID)
+    if not itemID or itemID <= 0 then return false end
+    if GetItemCount then
+        local count = GetItemCount(itemID, true)
+        if type(count) == "number" and count > 0 then return true end
+    end
+    if C_Item and C_Item.GetItemCount then
+        local count = C_Item.GetItemCount(itemID, true)
+        if type(count) == "number" and count > 0 then return true end
+    end
+    return false
+end
+
+local function TurnedIn(questID)
+    if not questID or not SG.QuestState then return false end
+    local completed = SG.QuestState(questID)
+    return completed and true or false
+end
+
+local function QuestTitle(questID)
+    local quest = SG.BiS and SG.BiS.Quest(questID)
+    if quest and type(quest.name) == "string" and quest.name ~= "" then
+        return quest.name, quest
+    end
+    local QuestDB = _G.QuestDB
+    if QuestDB and QuestDB.name then
+        local name = QuestDB.name(questID)
+        if type(name) == "string" and name ~= "" then return name, quest end
+    end
+    local ns = Namespace()
+    local names = ns and ns.Journal and ns.Journal.QuestChainNames
+    if type(names) == "table" then
+        local name = names[questID]
+        if type(name) == "string" and name ~= "" then return name, quest end
+    end
+    return nil, quest
+end
+
+local function ZoneName(quest, where)
+    if quest and type(quest.zone) == "string" and quest.zone ~= "" then return quest.zone end
+    if type(where) == "string" and where ~= "" and not where:find("not known", 1, true) then
+        local zone = where:match("^([^,]+)")
+        if zone and strtrim then zone = strtrim(zone) end
+        if zone and zone ~= "" then return zone end
+    end
+    return "Quests"
+end
+
+local function DungeonBand(name)
+    local ns = Namespace()
+    local journal = ns and ns.Journal
+    if not journal or type(journal.QuestData) ~= "table" or type(name) ~= "string" then return nil end
+    local want = name:lower()
+    for i = 1, #journal.QuestData do
+        local block = journal.QuestData[i]
+        if type(block) == "table" and type(block.name) == "string" and block.name:lower() == want then
+            local levels = block.levels
+            if type(levels) == "table" and type(levels[1]) == "number" and levels[1] > 0 then
+                return levels[1]
+            end
+        end
+    end
+    return nil
+end
+
+local function EntranceOf(name)
+    local ns = Namespace()
+    local journal = ns and ns.Journal
+    if not journal or not journal.Dungeons or type(name) ~= "string" then return nil end
+    local ok, dungeons = pcall(journal.Dungeons)
+    if not ok or type(dungeons) ~= "table" then return nil end
+    local want = name:lower()
+    for i = 1, #dungeons do
+        local dungeon = dungeons[i]
+        if type(dungeon) == "table" and (dungeon.name or ""):lower() == want and type(dungeon.entrance) == "table" then
+            return dungeon.entrance
+        end
+    end
+    return nil
+end
+
+local function ChanceText(trash, chance)
+    if trash then return "trash, no percent in the journal" end
+    if type(chance) == "number" and chance > 0 then
+        return string.format("%d%%", chance)
+    end
+    return "no percent in the journal"
+end
+
+local function ProfFrom(src)
+    if type(src) ~= "string" then return nil end
+    local who, place = src:match("^(.-)" .. SOURCE_SEP .. "(.+)$")
+    if place and place:lower():find("crafted", 1, true) and who and who ~= "" then
+        return who
+    end
+    return nil
+end
+
+local function IsCrafted(src)
+    return type(src) == "string" and src:lower():find("crafted", 1, true) ~= nil
+end
+
+local function IsWorld(src)
+    return type(src) == "string" and src:lower():find("world drop", 1, true) ~= nil
+end
+
+local function IsAuction(src)
+    return type(src) == "string" and src:lower():find("auction", 1, true) ~= nil
+end
+
+-- rows are { id, name, faction, map, x, y } from the profession data.
+local function PersonPin(rows, side)
+    if type(rows) ~= "table" then return nil end
+    for i = 1, #rows do
+        local row = rows[i]
+        if type(row) == "table" and row[4] and row[5] and row[6] then
+            local faction = row[3]
+            if faction == nil or faction == side or faction == "AH" or faction == "-" or faction == "B" then
+                return row[4], row[5], row[6], row[2]
+            end
+        end
+    end
+    return nil
+end
+
+local function RecipeNote(recipe, side)
+    if type(recipe) ~= "table" then
+        return "The list does not name where the recipe comes from."
+    end
+    local bits = {}
+    if type(recipe.skill) == "number" and recipe.skill > 0 then
+        bits[#bits + 1] = "The recipe asks for skill " .. recipe.skill .. "."
+    end
+    local source = recipe.source
+    if source == "trainer" then
+        bits[#bits + 1] = "Learned from a trainer."
+    elseif source == "teacher" then
+        bits[#bits + 1] = "Learned from a teacher."
+    elseif source == "vendor" then
+        local _, _, _, vendor = PersonPin(recipe.vendors, side)
+        if type(vendor) == "string" and vendor ~= "" then
+            bits[#bits + 1] = "Recipe vendor: " .. vendor .. "."
+        else
+            bits[#bits + 1] = "The recipe comes from a vendor."
+        end
+    elseif source == "drop" then
+        local mob = recipe.drops and recipe.drops[1] and recipe.drops[1][1]
+        if type(mob) == "string" and mob ~= "" then
+            bits[#bits + 1] = "The recipe drops. The list names " .. mob .. "."
+        else
+            bits[#bits + 1] = "The recipe drops. The list does not name the mob."
+        end
+    else
+        bits[#bits + 1] = "The list does not name where the recipe comes from."
+    end
+    return table.concat(bits, " ")
+end
+
+local function ContentLevel(fact, class, band)
+    local wear = WearLevel(class, fact)
+    if band and wear and wear > band then return wear end
+    if band then return band end
+    if fact.reqKnown and wear then return wear end
+    if (fact.ilvl or 0) > 1 then return fact.ilvl end
+    return wear or 1
+end
+
+local function QuestAllowed(questID, side, class)
+    local classMask, raceMask, questSide = QuestGate(questID)
+    if not ClassAllowed(classMask, class) then return false end
+    if not RaceAllowed(raceMask) then return false end
+    if questSide and questSide ~= "B" and questSide ~= side then return false end
+    local quest = SG.BiS and SG.BiS.Quest(questID)
+    if quest and SG.BiS.Match and SG.BiS.Match(quest, side) == "hide" then return false end
+    return true
+end
+
+local function BlankStep()
+    return {
+        kind = "gear",
+        optional = true,
+        match = "bis",
+        visible = true,
+    }
+end
+
+function SG.Gear.Build(side)
+    local alliance = side == "A"
+    local guide = {
+        id = alliance and "gear-a" or "gear-h",
+        title = alliance and "Alliance gear" or "Horde gear",
+        group = alliance and "Alliance gear" or "Horde gear",
+        category = "leveling",
+        side = side,
+        place = alliance and "Alliance" or "Horde",
+        blurb = GEAR_BLURB,
+        min = 1,
+        max = 60,
+        steps = {},
+        hiddenQuests = 0,
+        questCount = 0,
+        visibleQuests = 0,
+        empty = false,
+        route = false,
+        keep = true,
+        gear = true,
+    }
+    local class = SG.classToken
+    local note = {
+        kind = "note",
+        gearNote = true,
+        optional = false,
+        match = "bis",
+        visible = false,
+        segment = "Gear",
+        zone = "Gear",
+        level = 1,
+        title = "Nothing to upgrade",
+        text = "No upgrade is within reach yet.",
+        baseText = "No upgrade is within reach yet.",
+    }
+    local steps = { note }
+    if not class then
+        guide.steps = steps
+        note.index = 1
+        note.guide = guide.id
+        return guide
+    end
+
+    local sourceText = {}
+    local ns = Namespace()
+    local listed = ns and ns.BiSData and ns.BiSData.sources
+    local sources = ns and ns.BiS and ns.BiS.Sources
+    if type(listed) == "table" then
+        for itemID, src in pairs(listed) do
+            if type(itemID) == "number" and type(src) == "string" then
+                sourceText[itemID] = src
+                if sources and sources.Of then
+                    local ok, kind, target = pcall(sources.Of, itemID)
+                    if ok and kind == "quest" and type(target) == "number" then
+                        AddReward(target, itemID)
+                    end
+                end
+            end
+        end
+    end
+
+    local raw = {}
+    local questItems, dungeonItems, craftItems = {}, {}, {}
+    local seenQuest = {}
+    for questID, items in pairs(SG.Gear.byQuest) do
+        if not seenQuest[questID] and QuestAllowed(questID, side, class) then
+            local name, quest = QuestTitle(questID)
+            local rewards = {}
+            for i = 1, #items do
+                local fact = SG.Gear.Fact(items[i])
+                if fact and fact.slot and (fact.ilvl or 0) > 0 and WearLevel(class, fact) then
+                    rewards[#rewards + 1] = items[i]
+                end
+            end
+            if name and #rewards > 0 then
+                seenQuest[questID] = true
+                for i = 1, #rewards do questItems[rewards[i]] = true end
+                local map, x, y, where
+                if quest then
+                    map, x, y, where = quest.map, quest.x, quest.y, quest.where
+                end
+                if SG.Route and SG.Route.StartOf then
+                    local smap, sx, sy, swhere = SG.Route.StartOf(questID)
+                    if not (map and x and y) and smap and sx and sy then
+                        map, x, y = smap, sx, sy
+                    end
+                    if type(swhere) == "string" and swhere ~= "" then
+                        if type(where) ~= "string" or where == "" then where = swhere end
+                    end
+                end
+                local zone = ZoneName(quest, where)
+                local giver = SG.Engine and SG.Engine.Giver and SG.Engine.Giver(where) or nil
+                local from = (giver and giver ~= "") and (" from " .. giver) or ""
+                local inZone = (zone ~= "Quests") and (" in " .. zone) or ""
+                local step = BlankStep()
+                step.sourceKind = "quest"
+                step.questID = questID
+                step.questName = name
+                step.level = QuestLevel(questID)
+                step.segment = zone
+                step.zone = zone
+                step.placeName = zone ~= "Quests" and zone or nil
+                step.map, step.x, step.y = map, x, y
+                step.allRewards = rewards
+                step.rewards = rewards
+                step.gearItem = rewards[1]
+                step.itemID = rewards[1]
+                step.baseText = string.format("Pick up %s%s%s.", name, from, inZone)
+                step.text = step.baseText
+                step.title = "(Optional) " .. name
+                raw[#raw + 1] = step
+            end
+        end
+    end
+
+    local journal = ns and ns.Journal
+    if journal and journal.Dungeons then
+        local ok, dungeons = pcall(journal.Dungeons)
+        if ok and type(dungeons) == "table" then
+            for d = 1, #dungeons do
+                local dungeon = dungeons[d]
+                local dungeonName = type(dungeon) == "table" and dungeon.name or nil
+                if type(dungeonName) == "string" and dungeonName ~= "" then
+                    local best = {}
+                    local wings = dungeon.wings or {}
+                    for w = 1, #wings do
+                        local bosses = wings[w].bosses or {}
+                        for b = 1, #bosses do
+                            local boss = bosses[b]
+                            local loot = boss.loot
+                            if type(loot) == "table" then
+                                for i = 1, #loot do
+                                    local itemID = loot[i]
+                                    local fact = SG.Gear.Fact(itemID)
+                                    if fact and fact.slot and (fact.ilvl or 0) > 0 and WearLevel(class, fact) then
+                                        local trash = boss.trash and true or false
+                                        local chance = 0
+                                        if not trash and type(boss.chance) == "table" and type(boss.chance[i]) == "number" then
+                                            chance = boss.chance[i]
+                                        end
+                                        local prev = best[itemID]
+                                        local take = not prev
+                                        if prev and chance > (prev.chance or 0) then take = true end
+                                        if prev and (prev.chance or 0) <= 0 and chance > 0 then take = true end
+                                        if take then
+                                            best[itemID] = {
+                                                itemID = itemID,
+                                                trash = trash,
+                                                chance = chance,
+                                                boss = trash and "Trash" or (boss.name or "a boss"),
+                                            }
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    local band = DungeonBand(dungeonName)
+                    local entrance = dungeon.entrance
+                    for itemID, row in pairs(best) do
+                        dungeonItems[itemID] = true
+                        local fact = SG.Gear.Fact(itemID)
+                        local step = BlankStep()
+                        step.sourceKind = "dungeon"
+                        step.itemID = itemID
+                        step.gearItem = itemID
+                        step.allRewards = { itemID }
+                        step.rewards = { itemID }
+                        step.instance = dungeonName
+                        step.bossName = row.boss
+                        step.chanceText = ChanceText(row.trash, row.chance)
+                        step.level = ContentLevel(fact, class, band)
+                        step.segment = dungeonName
+                        step.zone = dungeonName
+                        if type(entrance) == "table" then
+                            step.map, step.x, step.y = entrance.map, entrance.x, entrance.y
+                        end
+                        step.title = "(Optional) " .. dungeonName
+                        step.baseText = step.title
+                        step.text = step.baseText
+                        raw[#raw + 1] = step
+                    end
+                end
+            end
+        end
+    end
+
+    local function addCraft(itemID, profName, note, map, x, y)
+        if craftItems[itemID] or questItems[itemID] then return end
+        local fact = SG.Gear.Fact(itemID)
+        if not fact or not fact.slot or (fact.ilvl or 0) <= 0 or not WearLevel(class, fact) then return end
+        craftItems[itemID] = true
+        local step = BlankStep()
+        step.sourceKind = "craft"
+        step.itemID = itemID
+        step.gearItem = itemID
+        step.allRewards = { itemID }
+        step.rewards = { itemID }
+        step.profName = profName
+        step.recipeNote = note
+        step.level = ContentLevel(fact, class, nil)
+        step.segment = profName or "Crafting"
+        step.zone = step.segment
+        step.map, step.x, step.y = map, x, y
+        step.title = "(Optional) " .. step.segment
+        step.baseText = step.title
+        step.text = step.baseText
+        raw[#raw + 1] = step
+    end
+
+    local recipes = ns and ns.RecipeData
+    if type(recipes) == "table" then
+        for _, prof in pairs(recipes) do
+            if type(prof) == "table" and type(prof.recipes) == "table" then
+                local profName = SpellName(prof.skillSpell)
+                for i = 1, #prof.recipes do
+                    local recipe = prof.recipes[i]
+                    local itemID = recipe and recipe.item
+                    if type(itemID) == "number" and itemID > 0 then
+                        local map, x, y
+                        if recipe.source == "trainer" or recipe.source == "teacher" then
+                            map, x, y = PersonPin(prof.trainers, side)
+                        elseif recipe.source == "vendor" then
+                            map, x, y = PersonPin(recipe.vendors, side)
+                        end
+                        local named = profName or ProfFrom(sourceText[itemID])
+                        addCraft(itemID, named, RecipeNote(recipe, side), map, x, y)
+                    end
+                end
+            end
+        end
+    end
+    for itemID, src in pairs(sourceText) do
+        if IsCrafted(src) then
+            addCraft(itemID, ProfFrom(src), "Source: " .. src .. ".", nil, nil, nil)
+        end
+    end
+
+    for itemID, src in pairs(sourceText) do
+        local auction = IsAuction(src)
+        local world = IsWorld(src)
+        if (auction or world) and not questItems[itemID] and not dungeonItems[itemID] and not craftItems[itemID] then
+            local fact = SG.Gear.Fact(itemID)
+            if fact and fact.slot and (fact.ilvl or 0) > 0 and WearLevel(class, fact) then
+                local step = BlankStep()
+                step.sourceKind = auction and "auction" or "world"
+                step.itemID = itemID
+                step.gearItem = itemID
+                step.allRewards = { itemID }
+                step.rewards = { itemID }
+                step.level = ContentLevel(fact, class, nil)
+                if auction then
+                    step.segment = "Auction house"
+                    step.worldLine = "Buy it on the auction house. " .. src .. "."
+                else
+                    step.segment = "World drops"
+                    step.worldLine = "World drop. The list does not say it is on the auction house."
+                end
+                step.zone = step.segment
+                step.title = "(Optional) " .. step.segment
+                step.baseText = step.worldLine
+                step.text = step.baseText
+                raw[#raw + 1] = step
+            end
+        end
+    end
+
+    local groups, order = {}, {}
+    for i = 1, #raw do
+        local step = raw[i]
+        local key = step.segment or "Gear"
+        local group = groups[key]
+        if not group then
+            group = { title = key, level = step.level or 1, steps = {} }
+            groups[key] = group
+            order[#order + 1] = key
+        end
+        if step.level and step.level < group.level then group.level = step.level end
+        group.steps[#group.steps + 1] = step
+    end
+    table.sort(order, function(a, b)
+        if groups[a].level ~= groups[b].level then return groups[a].level < groups[b].level end
+        if groups[a].title ~= groups[b].title then return groups[a].title < groups[b].title end
+        return a < b
+    end)
+    local minLevel, maxLevel, quests = nil, nil, 0
+    for i = 1, #order do
+        local group = groups[order[i]]
+        table.sort(group.steps, function(a, b)
+            if a.level ~= b.level then return a.level < b.level end
+            local aq, bq = a.questID or 0, b.questID or 0
+            if aq ~= bq then return aq < bq end
+            return (a.itemID or 0) < (b.itemID or 0)
+        end)
+        for s = 1, #group.steps do
+            local step = group.steps[s]
+            steps[#steps + 1] = step
+            if step.level then
+                if not minLevel or step.level < minLevel then minLevel = step.level end
+                if not maxLevel or step.level > maxLevel then maxLevel = step.level end
+            end
+            if step.questID then quests = quests + 1 end
+        end
+    end
+    for i = 1, #steps do
+        steps[i].index = i
+        steps[i].guide = guide.id
+    end
+    guide.steps = steps
+    guide.min = minLevel or 1
+    guide.max = maxLevel or 60
+    guide.questCount = quests
+    guide.visibleQuests = quests
+    return guide
+end
+
+local function IdsOf(step)
+    if step.allRewards and #step.allRewards > 0 then return step.allRewards end
+    if step.gearItem then return { step.gearItem } end
+    if step.rewards and #step.rewards > 0 then return step.rewards end
+    return {}
+end
+
+local function Why(pick)
+    if pick.worn == 0 then return " That slot is empty." end
+    if pick.wornName and pick.wornName ~= "" then return " It replaces " .. pick.wornName .. "." end
+    return " It is better than what you have on."
+end
+
+local function Survey(step, class, playerLevel)
+    local ids = IdsOf(step)
+    local result = { anyBetter = false, wearable = false, ownedOpen = false, now = {} }
+    local soon = (step.level or 1) <= playerLevel + AHEAD
+    local better, ownedBetter = 0, 0
+    for i = 1, #ids do
+        local fact = SG.Gear.Fact(ids[i])
+        local wear = fact and WearLevel(class, fact) or nil
+        if fact and fact.slot and (fact.ilvl or 0) > 0 and wear then
+            result.wearable = true
+            local worn, wornName = SG.Gear.Worn(fact.slot)
+            local scoreNow = SG.Gear.Usable(class, fact, playerLevel)
+            local now = scoreNow and (fact.req or 1) <= playerLevel
+            if now and (step.level or 1) <= playerLevel then
+                result.now[#result.now + 1] = { slot = fact.slot, score = scoreNow, ilvl = fact.ilvl }
+            end
+            if fact.ilvl > worn then
+                result.anyBetter = true
+                better = better + 1
+                if Owns(fact.itemID) then
+                    ownedBetter = ownedBetter + 1
+                end
+                local inReach = wear <= playerLevel + AHEAD
+                if soon and inReach and not Owns(fact.itemID) then
+                    local pick = {
+                        fact = fact,
+                        itemID = fact.itemID,
+                        worn = worn,
+                        wornName = wornName,
+                        score = scoreNow or 0,
+                        ilvl = fact.ilvl,
+                        now = now and true or false,
+                    }
+                    local prev = result.pick
+                    local take = not prev
+                    if prev and pick.now ~= prev.now then take = pick.now and not prev.now end
+                    if prev and pick.now == prev.now and pick.score ~= prev.score then take = pick.score > prev.score end
+                    if prev and pick.now == prev.now and pick.score == prev.score and pick.ilvl ~= prev.ilvl then
+                        take = pick.ilvl > prev.ilvl
+                    end
+                    if take then result.pick = pick end
+                end
+            end
+        end
+    end
+    result.ownedOpen = better > 0 and ownedBetter == better
+    return result
+end
+
+local function WritePick(step, pick, playerLevel)
+    local fact = pick.fact
+    local name = ItemLabel(fact)
+    local slot = fact.slotName or "slot"
+    local equip = ""
+    if (fact.req or 1) > playerLevel then
+        equip = string.format(" Equip it at %d.", fact.req)
+    end
+    local why = Why(pick)
+    local kept = step.sourceKind == "quest" and (step.bisFrom == "level" or step.bisFrom == "upgrade")
+    step.gearName = name
+    step.itemID = pick.itemID
+    step.slot = fact.slot
+    step.slotName = slot
+    step.bisFrom = pick.bis and "level" or "upgrade"
+    if step.sourceKind == "dungeon" then
+        local chance = step.chanceText or "no percent in the journal"
+        local boss = step.bossName or "a boss"
+        local place = step.instance or "the dungeon"
+        step.dropLine = boss .. "  " .. chance
+        step.title = "(Optional) " .. slot .. ": " .. name
+        step.text = string.format("(Optional) Run %s until %s drops from %s (%s).%s%s", place, name, boss, chance, equip, why)
+    elseif step.sourceKind == "craft" then
+        local prof = (step.profName and step.profName ~= "") and (step.profName .. ": ") or ""
+        local note = step.recipeNote or ""
+        if note ~= "" then note = " " .. note end
+        if prof == "" and note == "" then
+            note = " The list does not name the profession."
+        end
+        step.title = "(Optional) " .. slot .. ": " .. name
+        step.text = "(Optional) " .. prof .. "Craft " .. name .. "." .. note .. equip .. why
+    elseif step.sourceKind == "world" or step.sourceKind == "auction" then
+        local line = step.worldLine or "The loaded list does not name a source for this item."
+        step.title = "(Optional) " .. slot .. ": " .. name
+        step.text = "(Optional) " .. line .. equip .. why
+    else
+        step.title = "(Optional) " .. (step.questName or "Quest") .. ": " .. name
+        if not kept then
+            local kind = pick.bis and "Level BiS" or "Upgrade"
+            local because
+            if pick.worn == 0 then
+                because = "that slot is empty"
+            elseif pick.wornName and pick.wornName ~= "" then
+                because = "replaces " .. pick.wornName
+            else
+                because = "better than what you have on"
+            end
+            step.text = string.format("%s Take %s (%s). %s: %s.%s", step.baseText or "", name, slot:lower(), kind, because, equip)
+        end
+    end
+    step.baseText = step.baseText or step.text
+    if step.sourceKind ~= "quest" then step.baseText = step.text end
+    step.rewards = { pick.itemID }
+end
+
+function SG.Gear.Filter(guide)
+    if not guide or not guide.gear or not guide.steps then return end
+    local class = SG.classToken
+    local playerLevel = PlayerLevel()
+    local row
+    if SG.Engine and SG.Engine.Progress and guide.id then
+        row = SG.Engine.Progress(guide.id)
+    end
+    if row and type(row.skip) ~= "table" then row.skip = {} end
+    -- skip marks a line this gear pass hid. A Done click does not set skip,
+    -- so a later equip refresh does not reopen a line the player closed.
+    local function mark(i, step, mode)
+        if mode == "show" then
+            step.visible = true
+            step.gearState = "show"
+            if row and row.skip[i] and row.hold ~= i then
+                row.done[i] = nil
+                row.skip[i] = nil
+            end
+            return
+        end
+        if mode == "wait" then
+            step.visible = false
+            step.gearState = "wait"
+            if row and row.skip[i] and row.hold ~= i then
+                row.done[i] = nil
+                row.skip[i] = nil
+            end
+            return
+        end
+        step.visible = false
+        step.gearState = "done"
+        if row and row.hold ~= i then
+            if mode == "done" then
+                row.done[i] = true
+                row.skip[i] = nil
+            elseif not row.done[i] then
+                row.done[i] = true
+                row.skip[i] = true
+            end
+        end
+    end
+
+    local bestIlvl, bestScore = {}, {}
+    local surveyed = {}
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if not step.gearNote and class then
+            local info = Survey(step, class, playerLevel)
+            surveyed[i] = info
+            for n = 1, #info.now do
+                local item = info.now[n]
+                local score = bestScore[item.slot] or 0
+                local ilvl = bestIlvl[item.slot] or 0
+                if item.score > score then
+                    bestScore[item.slot] = item.score
+                    bestIlvl[item.slot] = item.ilvl
+                elseif item.score == score and item.ilvl > ilvl then
+                    bestIlvl[item.slot] = item.ilvl
+                end
+            end
+        end
+    end
+
+    local any = false
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if not step.gearNote then
+            local info = surveyed[i]
+            local pick = info and info.pick
+            -- A turned-in quest cannot be picked up again, even when the
+            -- reward would still beat the worn piece.
+            if class and step.questID and TurnedIn(step.questID) then
+                mark(i, step, "done")
+            elseif class and pick then
+                local slot = pick.fact.slot
+                local curveIlvl, curveScore = 0, 0
+                if SG.Gear.Best then
+                    curveIlvl, curveScore = SG.Gear.Best(class, slot, playerLevel)
+                end
+                local slotScore = bestScore[slot] or 0
+                local slotIlvl = bestIlvl[slot] or 0
+                if curveScore > slotScore or (curveScore == slotScore and curveIlvl > slotIlvl) then
+                    slotScore, slotIlvl = curveScore, curveIlvl
+                end
+                pick.bis = pick.now and slotIlvl > 0 and pick.ilvl >= slotIlvl and pick.score >= slotScore
+                if step.questID and (step.bisFrom == "level" or step.bisFrom == "upgrade") then
+                    pick.bis = step.bisFrom == "level"
+                end
+                WritePick(step, pick, playerLevel)
+                mark(i, step, "show")
+                any = true
+            elseif class and info and (info.ownedOpen or (info.wearable and not info.anyBetter)) then
+                -- Owned, or already outgeared. skip lets a later unequip reopen it.
+                mark(i, step, "auto")
+            else
+                mark(i, step, "wait")
+            end
+        end
+    end
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if step.gearNote then
+            step.visible = not any
+            step.gearState = "wait"
+            step.title = "Nothing to upgrade"
+            step.text = string.format(
+                "No quest reward, dungeon drop, craft, or world drop in the next %d levels beats what you have on. The list updates when you level or change gear. A piece you have already outgeared is marked done and left off.",
+                AHEAD
+            )
+            step.baseText = step.text
+            if row and row.hold ~= i then row.done[i] = nil end
+        end
+    end
+    if row and row.hold then
+        local held = guide.steps[row.hold]
+        if not held or not held.visible then row.hold = nil end
+    end
+end
+
+function SG.Gear.FilterGuides()
+    local guides = SG.Engine and SG.Engine.guides or {}
+    for i = 1, #guides do
+        if guides[i].gear then SG.Gear.Filter(guides[i]) end
+    end
+end
+
+function SG.Gear.RebuildGuides()
+    if not SG.Engine or not SG.Engine.byId or not SG.Gear.Build then return end
+    local sides = { "H", "A" }
+    for s = 1, #sides do
+        local guide = SG.Gear.Build(sides[s])
+        local list = SG.Engine.guides or {}
+        local replaced = false
+        for i = 1, #list do
+            if list[i].id == guide.id then
+                list[i] = guide
+                replaced = true
+                break
+            end
+        end
+        if not replaced then list[#list + 1] = guide end
+        SG.Engine.guides = list
+        SG.Engine.byId[guide.id] = guide
+        if SG.Engine.AlignProgress then SG.Engine.AlignProgress(guide) end
+        if SG.Gear.Apply then SG.Gear.Apply(guide) end
+        SG.Gear.Filter(guide)
+    end
+    local active = SG.Engine.Active and SG.Engine.Active()
+    if active and active.gear and SG.Engine.PlaceCursor then
+        SG.Engine.PlaceCursor(active)
+    end
+    if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
+    if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
 end

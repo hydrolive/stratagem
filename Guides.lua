@@ -1,6 +1,7 @@
--- Guides.lua: the route sources. Leveling entries are woven into one
--- faction route by Route.lua. They are not a menu the player picks.
--- Each quest id is expanded by Engine.lua into accept / complete / turn-in.
+-- Guides.lua: zone sources and the other categories. Gear does not open these zones.
+-- Zone writeups stay here as source data. They are not a menu the player picks.
+-- Each quest id is expanded by Engine.lua into accept / complete / turn-in
+-- when one of those other categories compiles the guide.
 local _, SG = ...
 if type(SG) ~= "table" then
     SG = _G.Stratagem or {}
@@ -45,7 +46,7 @@ local function Guide(def)
             Segment(def.segment or def.title, def.place, def.map, def.x, def.y, def.arrive, def.quests),
         }
     end
-    -- Zone writeups feed the one leveling route. They are not their own category.
+    -- Zone writeups stay here as source data. Gear does not walk them.
     local weave = def.weave
     if weave == nil and not def.dynamic and def.category == nil then
         weave = true
@@ -683,7 +684,7 @@ SG.GuideData = {
         side = "B", min = 15, max = 35,
         place = "Azeroth",
         blurb = "The BiS quests tied to a craft: Dig Rat Stew, the Deadmines gizmo, and Shoni's excavationators. Recipe BiS from trainers is on the Naowh list, not in a route.",
-        arrive = "These are spread out. Do each one when the leveling route walks you through its zone, or ride there on purpose.",
+        arrive = "These are spread out. Ride to each one when you want that craft.",
         quests = { 862, 2040, 2928 },
     }),
     Guide({

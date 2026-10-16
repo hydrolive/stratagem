@@ -1,4 +1,4 @@
--- Route.lua: one leveling route per faction, plus Level 60 BiS and attunements.
+-- Route.lua: Level 60 BiS, attunements, and the zone weave Gear does not open.
 -- Quest ids, bosses, and drop chances come from the loaded catalog and the
 -- Naowh journal. Nothing here invents a quest, an item, a boss, or a percent.
 local _, SG = ...
@@ -1254,8 +1254,8 @@ function SG.Route.ActiveId()
         local filter = SG.FactionFilter()
         if filter == "A" or filter == "H" then side = filter end
     end
-    if side == "A" then return "route-a" end
-    return "route-h"
+    if side == "A" then return "gear-a" end
+    return "gear-h"
 end
 
 -- One scan of the journal loot tables. The result is boss, dungeon, and chance.

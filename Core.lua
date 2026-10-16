@@ -409,8 +409,8 @@ function SG.OnLogin()
     if SG.Route and SG.Route.ActiveId then
         route = SG.Engine.Get(SG.Route.ActiveId())
     end
-    -- Leveling is one route. A saved dungeon or profession must not keep the arrow
-    -- while the window is showing that route.
+    -- Gear is the open list. A saved dungeon or profession must not keep the arrow
+    -- while the window is showing upgrades.
     local assigned = false
     if SG.db.category == "leveling" then
         if route then
