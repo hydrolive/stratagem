@@ -558,6 +558,24 @@ local function AddDungeon(steps, def, segment)
     end
 end
 
+-- A quests entry may be { id, class, races } when the catalog row needs a
+-- class gate, or when its race mask would hide a skyborne who can take it.
+-- races false clears that mask. The catalog row is copied, not edited.
+local function ResolveQuest(entry)
+    if type(entry) == "number" then
+        return SG.BiS.Quest(entry)
+    end
+    if type(entry) ~= "table" then return nil end
+    if entry.name or not entry.id then return entry end
+    local known = SG.BiS.Quest(entry.id)
+    if type(known) ~= "table" then return nil end
+    local copy = {}
+    for k, v in pairs(known) do copy[k] = v end
+    if entry.class ~= nil then copy.class = entry.class end
+    if entry.races ~= nil then copy.races = entry.races or nil end
+    return copy
+end
+
 function SG.Engine.Compile(def)
     local steps = {}
     local segments = def.segments or {}
@@ -612,8 +630,7 @@ function SG.Engine.Compile(def)
         else
             local quests = segment.quests or {}
             for q = 1, #quests do
-                local entry = quests[q]
-                local quest = type(entry) == "table" and entry or SG.BiS.Quest(entry)
+                local quest = ResolveQuest(quests[q])
                 if quest then
                     AddQuest(steps, def, segment, quest, prev, gaps)
                     prev = quest.level or prev

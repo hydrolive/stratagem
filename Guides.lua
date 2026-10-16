@@ -26,6 +26,16 @@ local function Path(id, name, level, class, races, notClass)
     return { id = id, name = name, level = level, class = class, races = races, notClass = notClass }
 end
 
+-- A step that turns in off the island keeps its own pin. The segment pin stays
+-- on the village for the quests around it.
+local function Pin(quest, map, x, y, zone)
+    quest.map = map
+    quest.x = x
+    quest.y = y
+    if zone then quest.zone = zone end
+    return quest
+end
+
 local function Guide(def)
     local segments
     if def.segments then
@@ -58,16 +68,160 @@ end
 
 SG.GuideData = {
     -- Horde, 1 to 30. Ordered by the zone you should be standing in.
+    -- Horde skyborne. Accept order follows the Horde skyborne island guide.
+    -- Levels are the Discovery quest level. A handful of class steps are not
+    -- in Discovery; those levels are that guide's quest level. Race masks are
+    -- left off so a Horde skyborne is not hidden by an Alliance-only tag.
+    -- 94411 stays a catalog id as well, so a mainland tauren still gets it.
     Guide({
         id = "h-zephras",
         title = "Zephras Isle",
         group = "Horde 1-30",
-        side = "H", min = 1, max = 12,
+        side = "H", min = 1, max = 13,
         place = "Zephras Isle",
-        map = 2521, x = 43.6, y = 44.8,
-        blurb = "Early best-in-slot pieces on Zephras come from the starting class quests. Tauren who began in Camp Narache should use the Mulgore guide instead.",
-        arrive = "Begin on Zephras Isle. Do these BiS quests before you take the boat or the portal to the mainland.",
-        quests = { 94411, 97257, 92646 },
+        blurb = "The skyborne start. Thendal Village through the airship to northern Mulgore. Shamans take Call of Earth and Call of Fire. Confront Lorthuna is the best-in-slot fight before you leave. Tauren who began in Camp Narache should use the Mulgore guide instead.",
+        segments = {
+            Segment("Thendal Village", "Zephras Isle", 2521, 42.8, 23.4,
+                "Start in Thendal Village. Coming of Age is the first quest. Shamans take Call of Earth from Windshaper Boro before the road south.",
+                nil,
+                {
+                    Path(92460, "Coming of Age", 1),
+                    Path(92461, "Harmony in Balance", 1),
+                    Path(92462, "Infestation Investigation", 2),
+                    Path(92463, "The Cirrusfly Queen", 3),
+                    Path(93552, "Harvesting Windstones", 4),
+                    Path(94414, "The Anchors of Zephras", 2),
+                    Path(92474, "Falling With Style", 2),
+                    Path(92464, "Elemental Unrest", 3),
+                    Path(92598, "The Gift of Skysight", 4),
+                    Path(92465, "Agitators", 3),
+                    Path(92469, "Return to Rorian", 4),
+                    Path(92471, "Aetheen of the Gales", 4),
+                    Path(92470, "Foul Matriarch", 5),
+                    Path(92473, "Aggressive Encroachment", 4),
+                    Path(92466, "Call of Earth", 4, "SHAMAN"),
+                    Path(92544, "Al'Aketh Thugs", 5),
+                    Path(92472, "The Next Step", 5),
+                    Path(96638, "The Adventurer", 6),
+                    Path(92467, "Call of Earth", 4, "SHAMAN"),
+                    Path(92468, "Call of Earth", 4, "SHAMAN"),
+                }),
+            Segment("Shen'dar Village", "Zephras Isle", 2521, 43.6, 44.8,
+                "Shen'dar Village is south along the road. Illaya Amberwind's quest is the best piece from this part of the island.",
+                { { id = 94411, races = false }, 94411 },
+                {
+                    Path(92595, "The Windshapers", 6),
+                }),
+            Segment("Shen'dar work", "Zephras Isle", 2521, 45.6, 45.4,
+                "Finish Constable Aonda's work in the village, the highlands, and the western watch. To Valanaar is the road to the south coast.",
+                nil,
+                {
+                    Path(96101, "The Great Outdoors", 6),
+                    Path(96646, "Camping 101: Cooking", 6),
+                    Path(92514, "Welcome to Shen'dar Village", 6),
+                    Path(92517, "The Criminal Element", 7),
+                    Path(92553, "Restocking the Larders", 6),
+                    Path(93951, "A Little Beauty", 7),
+                    Path(92515, "The Problem With Prideclaws", 6),
+                    Path(92516, "Hippogryph Harrassment", 7),
+                    Path(93319, "Pilfered Windstones", 7),
+                    Path(93318, "WANTED: Vulgara the Insatiable", 9),
+                    Path(93036, "Infiltrating the Cult", 8),
+                    Path(92529, "Falaath Village", 8),
+                    Path(92528, "Among the Faithful", 8),
+                    Path(92550, "Havoc in the Highlands", 8),
+                    Path(93926, "The Western Watch", 8),
+                    Path(92551, "Stolen Supplies", 8),
+                    Path(93927, "A Last Request", 8),
+                    Path(92579, "To Valanaar", 8),
+                    Path(93948, "Deliver the Signet", 9),
+                }),
+            Segment("Valanaar", "Zephras Isle", 2521, 66.2, 76.6,
+                "Valanaar is the town on the south coast. Hunters tame here, druids meet the great ursera, and warriors take the Skybreaker Bulwark.",
+                nil,
+                {
+                    Path(93317, "Crab Season", 9),
+                    Path(92679, "Blood Tithe", 9),
+                    Path(92700, "The Grand Skyseer", 9),
+                    Path(93949, "Bugged", 8),
+                    Path(92708, "A Grand Adventure", 12),
+                    Path(93735, "The Broken Construct", 9),
+                    Path(93736, "Unwelcome Spirits", 9),
+                    Path(93737, "The Broken Construct", 9),
+                    Path(92682, "Make Yourself Useful", 9),
+                    Path(92683, "Flutterfly Dust", 9),
+                    Path(92684, "Ornery Ornery Galestriders", 9),
+                    Path(92698, "What Is My Purpose?", 9),
+                    Path(92685, "The Hills Have Eyes", 9),
+                    Path(92693, "Standing Our Ground", 9),
+                    Path(92703, "Deliver the News", 9),
+                    Path(93738, "The Broken Construct", 9),
+                    Path(94978, "Taming the Beast", 10, "HUNTER"),
+                    Path(94979, "Taming the Beast", 10, "HUNTER"),
+                    Path(94013, "Taming the Beast", 10, "HUNTER"),
+                    Path(94050, "Training the Beast", 10, "HUNTER"),
+                    Path(93746, "A Firm Response", 9),
+                    Path(92871, "In Service of Zephras", 11),
+                    Path(93740, "Blood for Blood", 11),
+                    Path(93320, "Tower Defense", 11),
+                    Path(94006, "The Great Ursera Spirit", 10, "DRUID"),
+                    Path(92642, "Disrupting Logistics", 11),
+                    Path(92645, "Breaking the Breaker", 11),
+                    Path(94638, "Strength and Mercy", 10, "DRUID"),
+                    Path(94484, "Unnerving Silence", 11),
+                    Path(94896, "Aid For The Refugees", 11),
+                    Path(94897, "The Fate of a Loved One", 11),
+                    Path(92880, "Return to Valanaar", 11),
+                    Path(92881, "The High Elder's Request", 11),
+                    Path(92643, "The Turncoat", 11),
+                    Path(94003, "The Skybreaker Bulwark", 10, "WARRIOR"),
+                    Path(98512, "Al'Aketh Assassins", 11),
+                    Path(92644, "Unfortunate News", 11),
+                }),
+            Segment("Call of Fire", "Zephras Isle", 2521, 51.2, 86.0,
+                "Shamans only. Sessaria Skystride starts it, and Olariaan Swiftburn continues it at the Shrine of Flames. The last step is the searing totem.",
+                { { id = 97257, class = "SHAMAN" } },
+                {
+                    Path(97243, "Call of Fire", 10, "SHAMAN"),
+                    Path(97244, "Call of Fire", 10, "SHAMAN"),
+                    Path(97245, "Call of Fire", 10, "SHAMAN"),
+                }),
+            Segment("Shrine of Akir", "Zephras Isle", 2521, 65.2, 50.4,
+                "The Shrine of Akir is north of Valanaar. Finish the forest and the lake, then confront Lorthuna.",
+                nil,
+                {
+                    Path(94568, "The Cult's True Plans", 11),
+                    Path(92640, "Desperate Times", 11),
+                    Path(93065, "Prepare for Battle", 12),
+                    Path(92947, "Making Our Move", 12),
+                    Path(93958, "The Inner Sanctum", 12),
+                    Path(94485, "Tears of the Lady", 12),
+                    Path(94486, "Feathers for Binding", 11),
+                    Path(94487, "Unwanted and Unworthy", 11),
+                    Path(93165, "Mercy Falls on Deaf Ears", 13),
+                    Path(94490, "Ripped Missive", 12),
+                    Path(94488, "The Ties That Bind", 11),
+                    Path(94489, "The Wounds of Betrayal", 12),
+                    Path(94491, "The Fate of the Den", 12),
+                    Path(93159, "The Strange Hermit", 13),
+                    Path(93160, "The Forest's Bounty", 13),
+                    Path(93172, "Free the Hollows", 13),
+                }),
+            Segment("Confront Lorthuna", "Zephras Isle", 2521, 65.2, 50.4,
+                "Confront Lorthuna is one fight at the Rohashi Spires. Turn it in to Ayessa Dawnsinger. The next quests are how you leave the island.",
+                { 92646 }),
+            Segment("Leaving the isle", "Zephras Isle", 2521, 59.0, 79.6,
+                "The Fate of Zephras leads to the Horde airship. Welcome to Azeroth turns in where you land in northern Mulgore. Druids then see Turak Runetotem in Thunder Bluff. The Barrens road is next.",
+                nil,
+                {
+                    Path(93836, "The Fate of Zephras", 12),
+                    Path(93090, "What Comes Next", 13),
+                    Path(95349, "The Earthen Ring", 13),
+                    Pin(Path(95350, "Welcome to Azeroth", 13), 1412, 34.9, 31.9, "Mulgore"),
+                    Pin(Path(94911, "Child of Nature", 10, "DRUID"), 1412, 33.42, 22.52, "Mulgore"),
+                    Pin(Path(94913, "Moonglade", 10, "DRUID"), 1456, 76.48, 27.22, "Thunder Bluff"),
+                }),
+        },
     }),
     Guide({
         id = "h-mulgore",

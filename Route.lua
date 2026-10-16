@@ -1008,7 +1008,9 @@ local function MarkStarter(def, used)
         end
         local quests = segment.quests or {}
         for q = 1, #quests do
-            if type(quests[q]) == "number" then used[quests[q]] = true end
+            local id = quests[q]
+            if type(id) == "table" then id = id.id end
+            if type(id) == "number" then used[id] = true end
         end
     end
 end
