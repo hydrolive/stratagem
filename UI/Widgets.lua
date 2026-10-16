@@ -166,7 +166,7 @@ function SG.Widgets.Scroll(parent)
     local holder = CreateFrame("Frame", nil, parent)
     local scroll = CreateFrame("ScrollFrame", nil, holder)
     scroll:SetPoint("TOPLEFT")
-    scroll:SetPoint("BOTTOMRIGHT", -10, 0)
+    scroll:SetPoint("BOTTOMRIGHT", -16, 0)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(100, 100)
     scroll:SetScrollChild(content)
@@ -179,19 +179,36 @@ function SG.Widgets.Scroll(parent)
         if turn then turn(scroll, delta) end
     end)
 
+    -- The bar sits above the rows. A texture thumb cannot be dragged, and the
+    -- scroll child would cover a bar left at the holder's frame level.
     local bar = CreateFrame("Frame", nil, holder)
-    bar:SetWidth(4)
+    bar:SetWidth(16)
     bar:SetPoint("TOPRIGHT", 0, -2)
     bar:SetPoint("BOTTOMRIGHT", 0, 2)
+    bar:EnableMouse(true)
+    bar:EnableMouseWheel(true)
+    bar:SetFrameLevel(content:GetFrameLevel() + 8)
     local track = bar:CreateTexture(nil, "BACKGROUND")
-    track:SetAllPoints()
+    track:SetPoint("TOPLEFT", 5, 0)
+    track:SetPoint("BOTTOMRIGHT", -5, 0)
     SG.Paint(track, { 0.12, 0.11, 0.18, 0.9 })
-    local thumb = bar:CreateTexture(nil, "ARTWORK")
-    thumb:SetWidth(4)
-    SG.Paint(thumb, T.accent)
+    local thumb = CreateFrame("Frame", nil, bar)
+    thumb:SetWidth(16)
+    thumb:EnableMouse(true)
+    thumb:EnableMouseWheel(true)
     thumb:Hide()
+    local thumbTex = thumb:CreateTexture(nil, "ARTWORK")
+    thumbTex:SetPoint("TOPLEFT", 5, 0)
+    thumbTex:SetPoint("BOTTOMRIGHT", -5, 0)
+    SG.Paint(thumbTex, T.accent)
+
+    local function MaxScroll()
+        return math.max(0, content:GetHeight() - scroll:GetHeight())
+    end
 
     local function Update()
+        local above = content:GetFrameLevel() + 8
+        if bar:GetFrameLevel() ~= above then bar:SetFrameLevel(above) end
         local view = scroll:GetHeight()
         local total = content:GetHeight()
         if view < 1 or total <= view + 1 then
@@ -203,20 +220,70 @@ function SG.Widgets.Scroll(parent)
         local maxScroll = total - view
         local offset = scroll:GetVerticalScroll()
         local travel = view - height
+        if travel < 0 then travel = 0 end
         thumb:ClearAllPoints()
         thumb:SetHeight(height)
         thumb:SetPoint("TOP", bar, "TOP", 0, -travel * (offset / maxScroll))
     end
 
-    scroll:EnableMouseWheel(true)
-    scroll:SetScript("OnMouseWheel", function(_, delta)
-        local maxScroll = math.max(0, content:GetHeight() - scroll:GetHeight())
+    local function Wheel(_, delta)
+        local maxScroll = MaxScroll()
         local next = scroll:GetVerticalScroll() - delta * 46
         if next < 0 then next = 0 end
         if next > maxScroll then next = maxScroll end
         scroll:SetVerticalScroll(next)
         Update()
-    end)
+    end
+
+    local function RatioAtCursor()
+        local top = bar:GetTop()
+        local height = bar:GetHeight()
+        if not top or not height or height < 1 then return 0 end
+        local scale = bar:GetEffectiveScale() or 1
+        if scale < 0.01 then scale = 1 end
+        local _, cursorY = GetCursorPosition()
+        cursorY = cursorY / scale
+        local thumbH = thumb:IsShown() and thumb:GetHeight() or 0
+        local travel = height - thumbH
+        if travel < 1 then return 0 end
+        local ratio = (top - cursorY - (thumbH / 2)) / travel
+        if ratio < 0 then ratio = 0 end
+        if ratio > 1 then ratio = 1 end
+        return ratio
+    end
+
+    local function ScrollToCursor()
+        local maxScroll = MaxScroll()
+        if maxScroll < 1 then return end
+        scroll:SetVerticalScroll(RatioAtCursor() * maxScroll)
+        Update()
+    end
+
+    local function Drag(self)
+        if not IsMouseButtonDown("LeftButton") then
+            self:SetScript("OnUpdate", nil)
+            return
+        end
+        ScrollToCursor()
+    end
+
+    local function BeginDrag(self, button)
+        if button ~= "LeftButton" then return end
+        ScrollToCursor()
+        self:SetScript("OnUpdate", Drag)
+    end
+
+    bar:SetScript("OnMouseDown", BeginDrag)
+    bar:SetScript("OnMouseUp", function(self) self:SetScript("OnUpdate", nil) end)
+    bar:SetScript("OnMouseWheel", Wheel)
+    thumb:SetScript("OnMouseDown", BeginDrag)
+    thumb:SetScript("OnMouseUp", function(self) self:SetScript("OnUpdate", nil) end)
+    thumb:SetScript("OnMouseWheel", Wheel)
+    thumb:SetScript("OnEnter", function() SG.Paint(thumbTex, T.accentHot) end)
+    thumb:SetScript("OnLeave", function() SG.Paint(thumbTex, T.accent) end)
+
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", Wheel)
     local reported = 0
     scroll:SetScript("OnSizeChanged", function(self)
         local w = self:GetWidth() or 0
