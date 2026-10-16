@@ -835,6 +835,7 @@ function SG.Engine.Rebuild()
         local list = SG.Route.Attunements()
         for i = 1, #list do add(list[i]) end
     end
+    if SG.Recipes and SG.Recipes.Install then SG.Recipes.Install(true) end
 end
 
 function SG.Engine.Get(id)
@@ -847,7 +848,8 @@ function SG.Engine.AlignProgress(guide)
     if not guide or not SG.char or not SG.char.progress then return end
     local ids = {}
     for i = 1, #guide.steps do
-        ids[i] = guide.steps[i].questID or 0
+        local step = guide.steps[i]
+        ids[i] = step.questID or step.spell or 0
     end
     local row = SG.Engine.Progress(guide.id)
     local old = row.steps
@@ -893,6 +895,11 @@ function SG.Engine.Stats(guide)
             if not step.gearNote and (step.gearState == "show" or step.gearState == "done") then
                 required = required + 1
                 if step.gearState == "done" or SG.Engine.IsDone(guide, i) then done = done + 1 end
+            end
+        elseif guide.recipes then
+            if step.spell then
+                required = required + 1
+                if SG.Engine.IsDone(guide, i) then done = done + 1 end
             end
         elseif step.visible and not step.optional then
             required = required + 1
@@ -1127,6 +1134,7 @@ function SG.Engine.CatchUp(guide, fromSelection)
     if not guide then return 0 end
     if SG.RefreshQuestCache then SG.RefreshQuestCache() end
     if guide.gear and SG.Gear and SG.Gear.Filter then SG.Gear.Filter(guide) end
+    if guide.recipes and SG.Recipes and SG.Recipes.Apply then SG.Recipes.Apply(guide) end
     local row = SG.Engine.Progress(guide.id)
     local before = row.cursor
     if fromSelection then row.hold = nil end

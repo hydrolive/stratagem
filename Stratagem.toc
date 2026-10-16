@@ -5,7 +5,7 @@
 ## Version: 1.0.0
 ## SavedVariables: StratagemDB
 ## SavedVariablesPerCharacter: StratagemCharDB
-## OptionalDeps: NaowhForever, NaowhForever_BiS, NaowhForever_DungeonJournal, NaowhForever_Discovery, NaowwahForever, NaowwahForever_BiS, QuestieDB, TomTom
+## OptionalDeps: NaowhForever, NaowhForever_BiS, NaowhForever_DungeonJournal, NaowhForever_Discovery, NaowhForever_Professions, NaowwahForever, NaowwahForever_BiS, NaowwahForever_Professions, QuestieDB, TomTom
 ## IconTexture: Interface\AddOns\Stratagem\Media\Icon.tga
 ## X-Category: Questing
 
@@ -15,6 +15,7 @@ Data\Quests.lua
 Data\ItemSpecs.lua
 BiS.lua
 Gear.lua
+Recipes.lua
 Guides.lua
 Route.lua
 Engine.lua

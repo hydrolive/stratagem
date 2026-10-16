@@ -422,7 +422,7 @@ function SG.Tracker.Update()
         frame.coord:SetText(line)
         y = y + 18 + extra
         local rows, heights, contentH = nil, nil, 0
-        local rewardStep = step.kind == "turnin" or (step.kind == "gear" and step.rewards and step.rewards[1])
+        local rewardStep = step.kind == "turnin" or ((step.kind == "gear" or step.kind == "recipe") and step.rewards and step.rewards[1])
         if step.kind == "complete" or step.kind == "run" then
             rows, heights, contentH = ObjectiveRows(frame, step)
         elseif rewardStep then

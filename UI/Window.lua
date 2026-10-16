@@ -421,10 +421,11 @@ function SG.UI.Create()
     gearBar:SetHeight(28)
     gearBar:Hide()
     local gearTabs = {
-        { id = "quest", label = "Quests", width = 78 },
-        { id = "profession", label = "Profession", width = 104 },
-        { id = "auction", label = "Auction House", width = 128 },
-        { id = "world", label = "World Drops", width = 116 },
+        { id = "quest", label = "Quests", width = 70 },
+        { id = "profession", label = "Profession", width = 100 },
+        { id = "auction", label = "Auction House", width = 124 },
+        { id = "world", label = "World Drops", width = 108 },
+        { id = "vendor", label = "Vendors", width = 76 },
     }
     local gearButtons = {}
     local previous

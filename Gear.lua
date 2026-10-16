@@ -676,6 +676,7 @@ function SG.Gear.Start()
     if SG.Gear.scanning or SG.Gear.scanned then return end
     IndexCatalog()
     SG.Gear.facts = {}
+    SG.Gear.byVendor = {}
     SG.Gear.ready = false
     local ItemDB = _G.ItemDB
     if not ItemDB or not ItemDB.GetAllIds or not ItemDB.questRewards or not ItemDB.class then
@@ -705,6 +706,10 @@ function SG.Gear.Start()
                         AddReward(rewards[r], itemID)
                     end
                 end
+                if ItemDB.vendors then
+                    local vendors = CopyNpcIds(ItemDB.vendors(itemID))
+                    if #vendors > 0 then SG.Gear.byVendor[itemID] = vendors end
+                end
             end
         end
         index = last + 1
@@ -731,7 +736,7 @@ end
 local AHEAD = 3
 local SOURCE_SEP = " \194\183 "
 
-local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, and World Drops. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
+local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Vendors. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Vendors lists gear a vendor sells. When a slot is empty, that tab keeps the best vendor piece for the slot. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
 
 local function Namespace()
     return SG.BiS and SG.BiS.ns or nil
@@ -869,6 +874,118 @@ end
 
 local function IsAuction(src)
     return type(src) == "string" and src:lower():find("auction", 1, true) ~= nil
+end
+
+local function IsReputation(src)
+    return type(src) == "string" and src:lower():find("reputation", 1, true) ~= nil
+end
+
+local function CopyNpcIds(list)
+    local copy = {}
+    if type(list) ~= "table" then return copy end
+    if #list > 0 then
+        for i = 1, #list do
+            local id = list[i]
+            if type(id) == "number" and id > 0 then copy[#copy + 1] = id end
+        end
+        return copy
+    end
+    for _, id in pairs(list) do
+        if type(id) == "number" and id > 0 then copy[#copy + 1] = id end
+    end
+    table.sort(copy)
+    return copy
+end
+
+-- Questie spawn zones are area ids. The ui map is the loaded zone table.
+-- Nil until QuestieDB is loaded. false means the table was there and failed.
+function SG.Gear.AreaMaps()
+    if type(SG.Gear.areas) == "table" then return SG.Gear.areas end
+    if SG.Gear.areas == false then return nil end
+    local lib = _G.LibQuestieDB
+    local support = lib and lib.Support
+    if not support or not support.Get then return nil end
+    local ok, zone = pcall(support.Get, "ZoneDB")
+    if not ok or type(zone) ~= "table" or type(zone.private) ~= "table" then return nil end
+    local data = zone.private.areaIdToUiMapId
+    if type(data) ~= "string" or data == "" or not loadstring then
+        if type(data) == "string" then SG.Gear.areas = false end
+        return nil
+    end
+    local fn = loadstring(data)
+    if type(fn) ~= "function" then
+        SG.Gear.areas = false
+        return nil
+    end
+    local ran, parsed = pcall(fn)
+    if not ran or type(parsed) ~= "table" then
+        SG.Gear.areas = false
+        return nil
+    end
+    SG.Gear.areas = parsed
+    return parsed
+end
+
+local function MapPoint(px, py)
+    if type(px) ~= "number" or type(py) ~= "number" then return nil end
+    if px == -1 and py == -1 then return nil end
+    if px >= 0 and px <= 1 and py >= 0 and py <= 1 and (px > 0 or py > 0) then
+        px, py = px * 100, py * 100
+    end
+    if px <= 0 or py <= 0 or px > 100 or py > 100 then return nil end
+    return px, py
+end
+
+-- name, map, x, y when this NPC can sell to the player's faction.
+-- Nil when the NPC is the other faction. A missing pin still returns the name.
+local function VendorPin(npcID, side)
+    if type(npcID) ~= "number" or not side then return nil end
+    local NpcDB = _G.NpcDB
+    if not NpcDB then return nil end
+    local faction
+    if NpcDB.friendlyToFaction then
+        local ok, value = pcall(NpcDB.friendlyToFaction, npcID)
+        if ok then faction = value end
+    end
+    if faction == "A" or faction == "H" then
+        if faction ~= side then return nil end
+    end
+    local name
+    if NpcDB.name then
+        local ok, value = pcall(NpcDB.name, npcID)
+        if ok and type(value) == "string" and value ~= "" then name = value end
+    end
+    local map, x, y
+    if NpcDB.spawns then
+        local ok, spawns = pcall(NpcDB.spawns, npcID)
+        if ok and type(spawns) == "table" then
+            local maps = SG.Gear.AreaMaps()
+            local bestArea, point
+            for area, rows in pairs(spawns) do
+                if type(area) == "number" and type(rows) == "table" and #rows > 0 then
+                    local found
+                    for i = 1, #rows do
+                        if type(rows[i]) == "table" and MapPoint(rows[i][1], rows[i][2]) then
+                            found = rows[i]
+                            break
+                        end
+                    end
+                    if found and (not bestArea or area < bestArea) then
+                        bestArea = area
+                        point = found
+                    end
+                end
+            end
+            if type(point) == "table" then
+                local px, py = MapPoint(point[1], point[2])
+                local ui = maps and bestArea and maps[bestArea]
+                if px and type(ui) == "number" and ui > 0 then
+                    map, x, y = ui, px, py
+                end
+            end
+        end
+    end
+    return name, map, x, y, true
 end
 
 -- rows are { id, name, faction, map, x, y } from the profession data.
@@ -1187,10 +1304,95 @@ function SG.Gear.Build(side)
         end
     end
 
+    local vendorItems = {}
+    local function addVendor(itemID, note, map, x, y, vendorName)
+        if vendorItems[itemID] or questItems[itemID] or dungeonItems[itemID] or craftItems[itemID] then return end
+        local fact = SG.Gear.Fact(itemID)
+        if not fact or not fact.slot or (fact.ilvl or 0) <= 0 or not WearLevel(class, fact) then return end
+        vendorItems[itemID] = true
+        local step = BlankStep()
+        step.sourceKind = "vendor"
+        step.itemID = itemID
+        step.gearItem = itemID
+        step.allRewards = { itemID }
+        step.rewards = { itemID }
+        step.vendorNote = note
+        step.vendorName = vendorName
+        step.level = ContentLevel(fact, class, nil)
+        step.segment = (vendorName and vendorName ~= "") and vendorName or "Vendors"
+        step.zone = step.segment
+        step.map, step.x, step.y = map, x, y
+        if map and C_Map and C_Map.GetMapInfo then
+            local info = C_Map.GetMapInfo(map)
+            if type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
+                step.placeName = info.name
+            end
+        end
+        step.title = "(Optional) " .. step.segment
+        step.baseText = note
+        step.text = note
+        raw[#raw + 1] = step
+    end
+
+    local sold = SG.Gear.byVendor
+    if type(sold) == "table" then
+        for itemID, npcs in pairs(sold) do
+            if type(npcs) == "table" and #npcs > 0 then
+                local name, map, x, y, allowed
+                if not _G.NpcDB then
+                    allowed = true
+                else
+                    for i = 1, #npcs do
+                        local n, m, px, py, ok = VendorPin(npcs[i], side)
+                        if ok then
+                            allowed = true
+                            if not name and n then name = n end
+                            if m and not map then
+                                map, x, y = m, px, py
+                            end
+                            if name and map then break end
+                        end
+                    end
+                end
+                if allowed then
+                    local note
+                    if name then
+                        note = "Buy it from " .. name .. "."
+                    else
+                        note = "Buy it from a vendor. The list does not name them."
+                    end
+                    if IsReputation(sourceText[itemID]) then
+                        note = note .. " " .. sourceText[itemID] .. "."
+                    end
+                    addVendor(itemID, note, map, x, y, name)
+                end
+            end
+        end
+    end
+    local spots = ns and ns.BiSSpots
+    if type(spots) == "table" then
+        for itemID, spot in pairs(spots) do
+            if type(itemID) == "number" and type(spot) == "table" and spot.sells then
+                local name = type(spot.name) == "string" and spot.name ~= "" and spot.name or nil
+                local note = name and ("Buy it from " .. name .. ".") or "Buy it from a vendor. The list does not name them."
+                local map, x, y = spot.map, spot.x, spot.y
+                if type(map) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
+                    map, x, y = nil, nil, nil
+                end
+                addVendor(itemID, note, map, x, y, name)
+            end
+        end
+    end
+    for itemID, src in pairs(sourceText) do
+        if IsReputation(src) then
+            addVendor(itemID, "Buy it. " .. src .. ".", nil, nil, nil, nil)
+        end
+    end
+
     for itemID, src in pairs(sourceText) do
         local auction = IsAuction(src)
         local world = IsWorld(src)
-        if (auction or world) and not questItems[itemID] and not dungeonItems[itemID] and not craftItems[itemID] then
+        if (auction or world) and not questItems[itemID] and not dungeonItems[itemID] and not craftItems[itemID] and not vendorItems[itemID] then
             local fact = SG.Gear.Fact(itemID)
             if fact and fact.slot and (fact.ilvl or 0) > 0 and WearLevel(class, fact) then
                 local step = BlankStep()
@@ -1510,7 +1712,7 @@ end
 
 local function GearTab()
     local tab = SG.db and SG.db.gearTab
-    if tab == "profession" or tab == "auction" or tab == "world" then return tab end
+    if tab == "profession" or tab == "auction" or tab == "world" or tab == "vendor" then return tab end
     return "quest"
 end
 
@@ -1544,6 +1746,10 @@ local function AssignTab(step, profs)
     if kind == "auction" then
         step.gearTab = "auction"
         step.boe = true
+        return true
+    end
+    if kind == "vendor" then
+        step.gearTab = "vendor"
         return true
     end
     if kind ~= "craft" then return false end
@@ -1653,6 +1859,7 @@ local TAB_EMPTY = {
     profession = "No craft from a profession you have in the next %d levels beats what you have on for %s. A bind-on-pickup craft stays off until you have that profession.",
     auction = "No auction house upgrade in the next %d levels beats what you have on for %s. This tab is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops.",
     world = "No world drop or dungeon drop in the next %d levels beats what you have on for %s.",
+    vendor = "No vendor upgrade in the next %d levels beats what you have on for %s. When a slot is empty, the list keeps the best piece a vendor sells for that slot.",
 }
 
 local function Why(pick)
@@ -1662,6 +1869,19 @@ local function Why(pick)
     end
     if pick.wornName and pick.wornName ~= "" then return " It replaces " .. pick.wornName .. "." end
     return " It is better for this spec than what you already have."
+end
+
+local function PreferEmptyVendor(pick, prev)
+    local cand = {
+        score = pick.score, known = true, armor = pick.armor, ilvl = pick.ilvl, itemID = pick.itemID,
+    }
+    local other = {
+        score = prev.score, known = true, armor = prev.armor, ilvl = prev.ilvl, itemID = prev.itemID,
+    }
+    local beats = Beats(cand, other)
+    if beats then return true end
+    if beats == nil or Beats(other, cand) then return false end
+    return (pick.itemID or 0) < (prev.itemID or 0)
 end
 
 local function PreferPick(prev, pick)
@@ -1793,6 +2013,11 @@ local function WritePick(step, pick, playerLevel)
         else
             line = step.worldLine or "Buy it on the auction house."
         end
+        step.title = "(Optional) " .. slot .. ": " .. name
+        step.text = "(Optional) " .. line .. equip .. why
+    elseif step.sourceKind == "vendor" then
+        local line = step.vendorNote or "Buy it from a vendor. The list does not name them."
+        step.dropLine = line
         step.title = "(Optional) " .. slot .. ": " .. name
         step.text = "(Optional) " .. line .. equip .. why
     else
@@ -1942,7 +2167,13 @@ function SG.Gear.Filter(guide)
             elseif info.ownedOpen or (info.wearable and not info.anyBetter) then
                 AssignTab(step, profs)
                 if OnGearTab(step, tab) then
-                    mark(i, step, "auto")
+                    -- A vendor piece that is not an upgrade stays off the count.
+                    -- Owning that piece still closes its line.
+                    if step.sourceKind == "vendor" and not info.ownedOpen then
+                        mark(i, step, "aside")
+                    else
+                        mark(i, step, "auto")
+                    end
                 else
                     mark(i, step, "aside")
                 end
@@ -1950,6 +2181,37 @@ function SG.Gear.Filter(guide)
                 mark(i, step, "wait")
             end
         end
+    end
+    local bestEmpty = {}
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if step.visible and step.sourceKind == "vendor" then
+            local info = surveyed[i]
+            local pick = info and info.pick
+            if pick and pick.empty and pick.fact then
+                local slot = pick.fact.slot
+                local prev = bestEmpty[slot]
+                if not prev or PreferEmptyVendor(pick, prev.pick) then
+                    bestEmpty[slot] = { index = i, pick = pick }
+                end
+            end
+        end
+    end
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if step.visible and step.sourceKind == "vendor" then
+            local info = surveyed[i]
+            local pick = info and info.pick
+            if pick and pick.empty and pick.fact then
+                local best = bestEmpty[pick.fact.slot]
+                if best and best.index ~= i then mark(i, step, "aside") end
+            end
+        end
+    end
+    any = false
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if step.visible and not step.gearNote then any = true end
     end
     for i = 1, #guide.steps do
         local step = guide.steps[i]
