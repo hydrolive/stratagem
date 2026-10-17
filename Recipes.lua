@@ -1,5 +1,5 @@
 -- Recipes.lua: where to buy, earn, or loot a recipe for a profession this character has.
--- Trainer recipes stay with the trainer. This list does not invent a vendor, a quest, a drop, or a price.
+-- Trainer recipes stay with the trainer. This list does not invent a vendor, a quest, a drop, a rate, or a price.
 local _, SG = ...
 if type(SG) ~= "table" then
     SG = _G.Stratagem or {}
@@ -108,6 +108,53 @@ local function PriceText(copper)
     if silver > 0 then bits[#bits + 1] = silver .. "s" end
     if rest > 0 or #bits == 0 then bits[#bits + 1] = rest .. "c" end
     return table.concat(bits, " ")
+end
+
+-- Bind is the client field. 2 is bind on equip. Unknown is not treated as bind on equip.
+local function ItemBind(itemID)
+    if type(itemID) ~= "number" or itemID <= 0 then return nil end
+    local function read(ok, name, link, _, _, _, _, _, _, _, _, _, _, bind)
+        if ok and type(name) == "string" and name ~= "" and type(link) == "string" and type(bind) == "number" then
+            return bind
+        end
+        return nil
+    end
+    if C_Item and C_Item.GetItemInfo then
+        local bind = read(pcall(C_Item.GetItemInfo, itemID))
+        if type(bind) == "number" then return bind end
+    end
+    if GetItemInfo then
+        local name, _, _, _, _, _, _, _, _, _, _, _, _, bind = GetItemInfo(itemID)
+        if type(name) == "string" and name ~= "" and type(bind) == "number" then return bind end
+    end
+    return nil
+end
+
+local function AskRecipe(itemID)
+    if C_Item and C_Item.RequestLoadItemDataByID then
+        pcall(C_Item.RequestLoadItemDataByID, itemID)
+    elseif RequestLoadItemDataByID then
+        pcall(RequestLoadItemDataByID, itemID)
+    end
+end
+
+-- Auctionator's public price is copper from the last scan. Nil means it has no row.
+local function AuctionSentence(itemID)
+    local bind = ItemBind(itemID)
+    if bind == nil then
+        AskRecipe(itemID)
+        return nil
+    end
+    if bind ~= 2 then return "" end
+    local api = Auctionator and Auctionator.API and Auctionator.API.v1
+    local get = api and api.GetAuctionPriceByItemID
+    if type(get) ~= "function" then
+        return " Auctionator is not loaded, so this BoE recipe has no auction price."
+    end
+    local ok, price = pcall(get, "Stratagem", itemID)
+    local shown = ok and type(price) == "number" and PriceText(price) or nil
+    if shown then return " Auctionator last scanned this BoE recipe at " .. shown .. ".", shown end
+    return " Auctionator has no scanned auction price for this BoE recipe."
 end
 
 local function TrimPercent(chance)
@@ -253,11 +300,19 @@ local function DropTail(recipe)
     return " The list also names " .. table.concat(extra, ", ") .. "."
 end
 
+local function PointText(x, y)
+    if type(x) ~= "number" or type(y) ~= "number" then return nil end
+    if x < 0 or x > 100 or y < 0 or y > 100 then return nil end
+    return TrimPercent(x) .. ", " .. TrimPercent(y)
+end
+
 local function MobPhrase(mob)
     local name = mob[1]
     local pct = mob[2]
     local tag = mob[4]
     local who = type(name) == "string" and name ~= "" and name or nil
+    local spot = PointText(mob[5], mob[6])
+    if who and spot then who = who .. " near " .. spot end
     local rate = type(pct) == "number" and (TrimPercent(pct) .. "%") or nil
     if tag == "s" then
         if who and rate then return who .. " (seen, classic list " .. rate .. ")" end
@@ -273,17 +328,23 @@ local function MobPhrase(mob)
     return nil
 end
 
+local function MapName(map)
+    if type(map) ~= "number" or not C_Map or not C_Map.GetMapInfo then return nil end
+    local info = C_Map.GetMapInfo(map)
+    if type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
+        return info.name
+    end
+    return nil
+end
+
+-- entrance marks an instance whose map point is the door, not the zone that door sits in.
 local function ZoneTitle(row)
     local stored = row[1]
-    local map = row[2]
-    if type(map) == "number" and C_Map and C_Map.GetMapInfo then
-        local info = C_Map.GetMapInfo(map)
-        if type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
-            return info.name
-        end
-    end
-    if type(stored) == "string" and stored ~= "" then return stored end
-    return nil
+    local named = type(stored) == "string" and stored ~= "" and stored or nil
+    if row.entrance and named then return named end
+    local client = MapName(row[2])
+    if client then return client end
+    return named
 end
 
 local function ShownMobs(mobs, side)
@@ -319,6 +380,15 @@ local function GuideLine(row, shown, place)
     local zones = row[6]
     if type(zones) == "number" and zones > 0 then
         line = line .. " It lists " .. zones .. " more zones."
+    end
+    if row.entrance then
+        local door = MapName(row[2])
+        local at = PointText(row[3], row[4])
+        if door and at then
+            line = line .. " Its entrance is in " .. door .. " near " .. at .. "."
+        elseif at then
+            line = line .. " Its entrance is near " .. at .. "."
+        end
     end
     return line
 end
@@ -385,6 +455,35 @@ local function NpcHidden(id, side)
     return string.find(fac, side, 1, true) ~= nil
 end
 
+-- Questie spawn points are 0-100. The first point in the mob's own zone is the one named.
+local function FirstSpawn(id)
+    local db = _G.NpcDB
+    if not db or not db.spawns then return nil end
+    local ok, list = pcall(db.spawns, id)
+    if not ok or type(list) ~= "table" then return nil end
+    local function take(spots)
+        if type(spots) ~= "table" then return nil end
+        local spot = spots[1]
+        if type(spot) ~= "table" then return nil end
+        local x, y = spot[1], spot[2]
+        if type(x) ~= "number" or type(y) ~= "number" then return nil end
+        if x < 0 or x > 100 or y < 0 or y > 100 then return nil end
+        return x, y
+    end
+    local prefer
+    if db.zoneID then
+        local known, area = pcall(db.zoneID, id)
+        if known then prefer = list[area] end
+    end
+    local x, y = take(prefer)
+    if x then return x, y end
+    for _, spots in pairs(list) do
+        x, y = take(spots)
+        if x then return x, y end
+    end
+    return nil
+end
+
 -- QuestieDB wowhead rows are quest-objective items. Use one only when Forever Guide has no recipe row.
 local function DropListSpots(itemID)
     if not SG.Gear or not SG.Gear.DropTable then return nil end
@@ -422,7 +521,8 @@ local function DropListSpots(itemID)
                     groups[place] = bucket
                     order[#order + 1] = place
                 end
-                bucket[#bucket + 1] = { got, ranked[i][2] }
+                local sx, sy = FirstSpawn(npc)
+                bucket[#bucket + 1] = { got, ranked[i][2], sx, sy }
             end
         end
     end
@@ -434,7 +534,10 @@ local function DropListSpots(itemID)
         local bucket = groups[place]
         local bits = {}
         for m = 1, #bucket do
-            bits[#bits + 1] = bucket[m][1] .. " (" .. TrimPercent(bucket[m][2]) .. "%)"
+            local phrase = bucket[m][1]
+            local at = PointText(bucket[m][3], bucket[m][4])
+            if at then phrase = phrase .. " near " .. at end
+            bits[#bits + 1] = phrase .. " (" .. TrimPercent(bucket[m][2]) .. "%)"
         end
         local where = place ~= "" and place or nil
         local text = "The drop list names " .. table.concat(bits, ", ")
@@ -500,7 +603,8 @@ local function QuestieSpots(itemID)
                 groups[place] = bucket
                 order[#order + 1] = place
             end
-            bucket[#bucket + 1] = name
+            local sx, sy = FirstSpawn(ids[i])
+            bucket[#bucket + 1] = { name, sx, sy }
         end
     end
     if #order == 0 then return nil end
@@ -508,7 +612,15 @@ local function QuestieSpots(itemID)
     for i = 1, #order do
         local place = order[i]
         local where = place ~= "" and place or nil
-        local text = "Questie names " .. table.concat(groups[place], ", ") .. "."
+        local names = {}
+        local grouped = groups[place]
+        for m = 1, #grouped do
+            local phrase = grouped[m][1]
+            local at = PointText(grouped[m][2], grouped[m][3])
+            if at then phrase = phrase .. " near " .. at end
+            names[#names + 1] = phrase
+        end
+        local text = "Questie names " .. table.concat(names, ", ") .. "."
         if where then text = text .. " It places that in " .. where .. "." end
         text = text .. " It has no percent."
         spots[#spots + 1] = {
@@ -516,7 +628,7 @@ local function QuestieSpots(itemID)
             place = where,
             tag = "World Drops",
             order = 3,
-            line = groups[place][1],
+            line = groups[place][1][1],
         }
     end
     return spots
@@ -690,6 +802,7 @@ local function MakeStep(recipe, spot, profName)
     elseif skill > 0 then
         step.dropLine = "Skill " .. skill
     end
+    if spot.tag == "World Drops" then step.worldDrop = true end
     if type(recipeId) == "number" and recipeId > 0 then
         step.rewards = { recipeId }
         step.itemID = recipeId
@@ -763,7 +876,7 @@ function SG.Recipes.Build()
         category = "professions",
         side = "B",
         place = "Professions",
-        blurb = "Recipes a vendor sells, a quest rewards, or that drop in the world, for a profession this character has. Grouped by profession, then vendors, quests, or world drops, then the zone or instance. A world drop names the mob and the percent when Forever Guide's item search has them. That percent is the classic chance Forever Guide ships, not a Forever Wowhead rate. A sighting with no percent says so. Trainer recipes stay at the trainer. A learned recipe leaves the list. This does not level the profession for you.",
+        blurb = "Recipes a vendor sells, a quest rewards, or that drop in the world, for a profession this character has. Grouped by profession, then vendors, quests, or world drops, then the zone or instance. A world drop names the mob, where that mob stands when Forever Guide stored a point, and the percent when its item search has them. That percent is the classic chance Forever Guide ships, not a Forever Wowhead rate. A sighting with no percent says so. A dungeon names its entrance when that point is stored. A bind-on-equip drop adds Auctionator's last scanned auction price when that addon has one. Trainer recipes stay at the trainer. A learned recipe is marked done and leaves the list. This does not level the profession for you.",
         min = 1,
         max = 60,
         steps = {},
@@ -825,6 +938,25 @@ function SG.Recipes.Apply(guide)
             local known = SpellKnown(step.spell)
             local closed = known or (row and row.done[i] and true or false)
             if known and row and row.hold ~= i then row.done[i] = true end
+            if step.worldDrop and type(step.itemID) == "number" then
+                local extra, money = AuctionSentence(step.itemID)
+                local body = step.baseText or step.text or ""
+                if type(extra) == "string" then
+                    step.text = body .. extra
+                else
+                    step.text = body
+                end
+                if step.baseLine == nil then step.baseLine = step.dropLine or "" end
+                if type(money) == "string" and money ~= "" then
+                    if step.baseLine ~= "" then
+                        step.dropLine = step.baseLine .. " · AH " .. money
+                    else
+                        step.dropLine = "AH " .. money
+                    end
+                else
+                    step.dropLine = step.baseLine ~= "" and step.baseLine or nil
+                end
+            end
             if closed then
                 step.visible = false
             else
@@ -868,6 +1000,7 @@ function SG.Recipes.Install(quiet)
 end
 
 function SG.Recipes.Refresh()
+    if SG.Recipes.WatchPrices then SG.Recipes.WatchPrices() end
     local current = SG.Engine and SG.Engine.Get and SG.Engine.Get(GUIDE_ID)
     if not current or current.profKey ~= DataKey() then
         SG.Recipes.Install()
@@ -880,4 +1013,41 @@ function SG.Recipes.Refresh()
     end
     if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
     if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+end
+
+function SG.Recipes.WatchPrices()
+    if SG.Recipes.priceWatch then return end
+    local api = Auctionator and Auctionator.API and Auctionator.API.v1
+    local reg = api and api.RegisterForDBUpdate
+    if type(reg) ~= "function" then return end
+    local ok = pcall(reg, "Stratagem", function()
+        if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
+    end)
+    if ok then SG.Recipes.priceWatch = true end
+end
+
+function SG.Recipes.OnItem(itemID)
+    if type(itemID) ~= "number" then return end
+    if SG.Recipes.itemWait then return end
+    local guide = SG.Engine and SG.Engine.Get and SG.Engine.Get(GUIDE_ID)
+    if not guide or not guide.steps then return end
+    local hit = false
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        if step.itemID == itemID and step.worldDrop then
+            hit = true
+            break
+        end
+    end
+    if not hit then return end
+    SG.Recipes.itemWait = true
+    SG.After(0.2, function()
+        SG.Recipes.itemWait = false
+        local current = SG.Engine and SG.Engine.Get and SG.Engine.Get(GUIDE_ID)
+        if current then SG.Recipes.Apply(current) end
+        local active = SG.Engine and SG.Engine.Active and SG.Engine.Active()
+        if not active or not active.recipes then return end
+        if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
+        if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+    end)
 end

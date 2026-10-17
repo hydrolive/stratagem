@@ -5,7 +5,7 @@
 ## Version: 1.0.0
 ## SavedVariables: StratagemDB
 ## SavedVariablesPerCharacter: StratagemCharDB
-## OptionalDeps: NaowhForever, NaowhForever_BiS, NaowhForever_DungeonJournal, NaowhForever_Discovery, NaowhForever_Professions, NaowhForever_QoL, NaowwahForever, NaowwahForever_BiS, NaowwahForever_Professions, Polestar, Polestar_Guides, Polestar_Codex, Polestar_Nav, Polestar_QuestDB, QuestieDB, TomTom
+## OptionalDeps: NaowhForever, NaowhForever_BiS, NaowhForever_DungeonJournal, NaowhForever_Discovery, NaowhForever_Professions, NaowhForever_QoL, NaowwahForever, NaowwahForever_BiS, NaowwahForever_Professions, Polestar, Polestar_Guides, Polestar_Codex, Polestar_Nav, Polestar_QuestDB, QuestieDB, TomTom, Auctionator
 ## IconTexture: Interface\AddOns\Stratagem\Media\Icon.tga
 ## X-Category: Questing
 

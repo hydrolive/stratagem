@@ -465,12 +465,13 @@ function SG.OnLogin()
         "QUEST_LOG_UPDATE", "QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED",
         "GET_ITEM_INFO_RECEIVED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
         "BAG_UPDATE", "SKILL_LINES_CHANGED", "NEW_RECIPE_LEARNED", "UPDATE_FACTION",
-        "ZONE_CHANGED_NEW_AREA",
+        "ZONE_CHANGED_NEW_AREA", "AUCTION_HOUSE_CLOSED",
     }
     for i = 1, #events do
         SG.eventFrame:RegisterEvent(events[i])
     end
     if SG.Reputation and SG.Reputation.RefreshSoon then SG.Reputation.RefreshSoon() end
+    if SG.Recipes and SG.Recipes.WatchPrices then SG.Recipes.WatchPrices() end
 end
 
 function SG.RememberRecent(guideID)
@@ -591,9 +592,13 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         end
     elseif event == "PLAYER_LOGIN" then
         SG.OnLogin()
+    elseif event == "ADDON_LOADED" and arg1 == "Auctionator" then
+        if SG.Recipes and SG.Recipes.WatchPrices then SG.Recipes.WatchPrices() end
+        if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
     elseif event == "GET_ITEM_INFO_RECEIVED" then
         if SG.UI.OnItem then SG.UI.OnItem(arg1) end
         if SG.Gear and SG.Gear.OnItem then SG.Gear.OnItem(arg1, arg2) end
+        if SG.Recipes and SG.Recipes.OnItem then SG.Recipes.OnItem(arg1) end
     elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED" then
         if SG.Engine and SG.Engine.OnQuestUpdate then SG.Engine.OnQuestUpdate() end
     elseif event == "UPDATE_FACTION" then
@@ -613,5 +618,7 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         if event == "PLAYER_LEVEL_UP" and SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
+    elseif event == "AUCTION_HOUSE_CLOSED" then
+        if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
     end
 end)
