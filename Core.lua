@@ -389,7 +389,7 @@ function SG.InitDB()
     if type(SG.char.progress) ~= "table" then SG.char.progress = {} end
     if type(SG.char.kills) ~= "table" then SG.char.kills = {} end
     if SG.db.category == "all" or SG.db.category == nil then SG.db.category = "leveling" end
-    if SG.db.gearTab ~= "quest" and SG.db.gearTab ~= "profession" and SG.db.gearTab ~= "auction" and SG.db.gearTab ~= "world" then
+    if SG.db.gearTab ~= "quest" and SG.db.gearTab ~= "profession" and SG.db.gearTab ~= "auction" and SG.db.gearTab ~= "world" and SG.db.gearTab ~= "reputation" then
         SG.db.gearTab = "quest"
     end
 end
@@ -455,11 +455,13 @@ function SG.OnLogin()
     local events = {
         "QUEST_LOG_UPDATE", "QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED",
         "GET_ITEM_INFO_RECEIVED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
-        "BAG_UPDATE", "SKILL_LINES_CHANGED", "NEW_RECIPE_LEARNED", "ZONE_CHANGED_NEW_AREA",
+        "BAG_UPDATE", "SKILL_LINES_CHANGED", "NEW_RECIPE_LEARNED", "UPDATE_FACTION",
+        "ZONE_CHANGED_NEW_AREA",
     }
     for i = 1, #events do
         SG.eventFrame:RegisterEvent(events[i])
     end
+    if SG.Reputation and SG.Reputation.RefreshSoon then SG.Reputation.RefreshSoon() end
 end
 
 function SG.RememberRecent(guideID)
@@ -584,9 +586,13 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         if SG.Gear and SG.Gear.OnItem then SG.Gear.OnItem(arg1, arg2) end
     elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_TURNED_IN" or event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED" then
         if SG.Engine and SG.Engine.OnQuestUpdate then SG.Engine.OnQuestUpdate() end
+    elseif event == "UPDATE_FACTION" then
+        if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
+        if SG.Reputation and SG.Reputation.RefreshSoon then SG.Reputation.RefreshSoon() end
     elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "PLAYER_LEVEL_UP"
         or event == "BAG_UPDATE" or event == "SKILL_LINES_CHANGED" or event == "NEW_RECIPE_LEARNED" then
         if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
+        if SG.Reputation and SG.Reputation.RefreshSoon then SG.Reputation.RefreshSoon() end
         if event == "SKILL_LINES_CHANGED" or event == "NEW_RECIPE_LEARNED" then
             if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
         end

@@ -804,7 +804,7 @@ end
 local AHEAD = 3
 local SOURCE_SEP = " \194\183 "
 
-local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, and World Drops. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. A quest reward that is an upgrade lists the earlier quests in that chain under one Chain header. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
+local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward that is an upgrade lists the earlier quests in that chain under one Chain header. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
 
 local function Namespace()
     return SG.BiS and SG.BiS.ns or nil
@@ -1386,6 +1386,10 @@ function SG.Gear.Build(side)
         end
     end
 
+    if SG.Reputation and SG.Reputation.AppendGear then
+        SG.Reputation.AppendGear(raw, class, side)
+    end
+
     for itemID, src in pairs(sourceText) do
         local auction = IsAuction(src)
         local world = IsWorld(src)
@@ -1760,9 +1764,48 @@ local function CollectHeld(class, playerLevel)
     return { count = count, bySlot = bySlot }
 end
 
+-- One pass over worn and bag gear. The reputation guide uses this so it does
+-- not walk the bags once per reward.
+function SG.Gear.Held()
+    local class = SG.classToken
+    if not class then return nil end
+    return CollectHeld(class, PlayerLevel()), class, PlayerLevel()
+end
+
+-- nil while stats are still loading. false when it is not an upgrade you can
+-- wear within AHEAD levels. true when it beats the piece you would replace.
+function SG.Gear.BeatsHeld(itemID, held, class, playerLevel, allowAsk)
+    if not itemID or not class then return false end
+    local fact = SG.Gear.Fact(itemID)
+    if not fact or not fact.slot or (fact.ilvl or 0) <= 0 then return false end
+    local wear = playerLevel or 1
+    if (fact.req or 1) > wear then wear = fact.req end
+    if wear > (playerLevel or 1) + AHEAD then return false end
+    if not SG.Gear.Usable(class, fact, wear) then return false end
+    local score, known, failed = SpecValue(itemID, allowAsk and true or false)
+    if failed or not known then
+        if failed then return false end
+        return nil
+    end
+    local slots = held and held.bySlot or {}
+    local bar, barPending = BarFor(fact.slot, slots[fact.slot])
+    if barPending then return nil end
+    local beats = Beats({
+        itemID = itemID,
+        score = score or 0,
+        known = true,
+        armor = ArmorTier(class, fact, wear),
+        ilvl = fact.ilvl or 0,
+    }, bar)
+    if beats == nil then return nil end
+    local counts = held and held.count or {}
+    if (counts[itemID] or 0) > 0 then return false end
+    return beats and true or false
+end
+
 local function GearTab()
     local tab = SG.db and SG.db.gearTab
-    if tab == "profession" or tab == "auction" or tab == "world" then return tab end
+    if tab == "profession" or tab == "auction" or tab == "world" or tab == "reputation" then return tab end
     return "quest"
 end
 
@@ -1796,6 +1839,10 @@ local function AssignTab(step, profs)
     if kind == "auction" then
         step.gearTab = "auction"
         step.boe = true
+        return true
+    end
+    if kind == "reputation" then
+        step.gearTab = "reputation"
         return true
     end
     if kind ~= "craft" then return false end
@@ -1905,6 +1952,7 @@ local TAB_EMPTY = {
     profession = "No craft from a profession you have in the next %d levels beats what you have on for %s. A bind-on-pickup craft stays off until you have that profession.",
     auction = "No auction house upgrade in the next %d levels beats what you have on for %s. This tab is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops.",
     world = "No world drop or dungeon drop in the next %d levels beats what you have on for %s.",
+    reputation = "No reputation reward in the next %d levels beats what you have on for %s. Hand-ins for a reward show with that reputation.",
 }
 
 local function Why(pick)
@@ -1944,6 +1992,7 @@ local function MaybeThisTab(step, tab, profs)
         return tab == "auction"
     end
     if kind == "world" then return tab == "world" or tab == "auction" end
+    if kind == "reputation" then return tab == "reputation" end
     return false
 end
 
@@ -2070,6 +2119,24 @@ local function WritePick(step, pick, playerLevel)
         end
         step.title = "(Optional) " .. slot .. ": " .. name
         step.text = "(Optional) " .. line .. equip .. why
+    elseif step.sourceKind == "reputation" then
+        local who = step.vendorName or "the quartermaster"
+        local standing = step.repStandingName or "The required standing"
+        local cost = ""
+        if type(step.repPrice) == "number" and step.repPrice > 0 then
+            local gold = math.floor(step.repPrice / 10000)
+            local silver = math.floor((step.repPrice % 10000) / 100)
+            local copper = step.repPrice % 100
+            local bits = {}
+            if gold > 0 then bits[#bits + 1] = gold .. "g" end
+            if silver > 0 then bits[#bits + 1] = silver .. "s" end
+            if copper > 0 or #bits == 0 then bits[#bits + 1] = copper .. "c" end
+            cost = " It costs " .. table.concat(bits, " ") .. "."
+        end
+        local faction = step.repFactionName or step.segment or "that reputation"
+        step.title = "(Optional) " .. slot .. ": " .. name
+        step.text = string.format("(Optional) Buy %s from %s. %s with %s is required.%s%s%s",
+            name, who, standing, faction, cost, equip, why)
     else
         step.title = "(Optional) " .. (step.questName or "Quest") .. ": " .. name
         local kind = pick.bis and "Level BiS" or "Upgrade"
@@ -2270,6 +2337,7 @@ function SG.Gear.Filter(guide)
         end
     end
     ApplyChains(guide, row)
+    if SG.Reputation and SG.Reputation.Fold then SG.Reputation.Fold(guide) end
     any = false
     for i = 1, #guide.steps do
         local step = guide.steps[i]
@@ -2328,6 +2396,7 @@ function SG.Gear.RebuildGuides()
         if SG.Gear.Apply then SG.Gear.Apply(guide) end
         SG.Gear.Filter(guide)
     end
+    if SG.Reputation and SG.Reputation.Install then SG.Reputation.Install(true) end
     local active = SG.Engine.Active and SG.Engine.Active()
     if active and active.gear and SG.Engine.PlaceCursor then
         SG.Engine.PlaceCursor(active)

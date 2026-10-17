@@ -16,6 +16,7 @@ Data\ItemSpecs.lua
 BiS.lua
 Gear.lua
 Recipes.lua
+Reputation.lua
 Guides.lua
 Route.lua
 Engine.lua

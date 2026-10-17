@@ -281,6 +281,9 @@ function SG.UI.Create()
             elseif self.id ~= "options" then
                 SG.state.tab = "home"
             end
+            if self.id == "reputation" and SG.Reputation and SG.Reputation.Refresh then
+                SG.Reputation.Refresh()
+            end
             SG.UI.Refresh(true)
         end)
         button:SetScript("OnEnter", function(self)
@@ -421,10 +424,11 @@ function SG.UI.Create()
     gearBar:SetHeight(28)
     gearBar:Hide()
     local gearTabs = {
-        { id = "quest", label = "Quests", width = 94 },
-        { id = "profession", label = "Profession", width = 120 },
-        { id = "auction", label = "Auction House", width = 150 },
-        { id = "world", label = "World Drops", width = 118 },
+        { id = "quest", label = "Quests", width = 70 },
+        { id = "profession", label = "Profession", width = 96 },
+        { id = "auction", label = "Auction House", width = 112 },
+        { id = "world", label = "World Drops", width = 96 },
+        { id = "reputation", label = "Reputation", width = 100 },
     }
     local gearButtons = {}
     local previous
@@ -445,6 +449,9 @@ function SG.UI.Create()
             if active and active.gear and SG.Gear and SG.Gear.Filter then
                 SG.Gear.Filter(active)
                 if SG.Engine.PlaceCursor then SG.Engine.PlaceCursor(active) end
+            end
+            if info.id == "reputation" and SG.Reputation and SG.Reputation.Refresh then
+                SG.Reputation.Refresh()
             end
             SG.UI.Refresh(true)
             if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end

@@ -836,6 +836,7 @@ function SG.Engine.Rebuild()
         for i = 1, #list do add(list[i]) end
     end
     if SG.Recipes and SG.Recipes.Install then SG.Recipes.Install(true) end
+    if SG.Reputation and SG.Reputation.Install then SG.Reputation.Install(true) end
 end
 
 function SG.Engine.Get(id)
@@ -1135,6 +1136,10 @@ function SG.Engine.CatchUp(guide, fromSelection)
     if SG.RefreshQuestCache then SG.RefreshQuestCache() end
     if guide.gear and SG.Gear and SG.Gear.Filter then SG.Gear.Filter(guide) end
     if guide.recipes and SG.Recipes and SG.Recipes.Apply then SG.Recipes.Apply(guide) end
+    if guide.reputation and SG.Reputation and SG.Reputation.Prepare then
+        SG.Reputation.Prepare(guide.id)
+        guide = SG.Engine.Get(guide.id) or guide
+    end
     local row = SG.Engine.Progress(guide.id)
     local before = row.cursor
     if fromSelection then row.hold = nil end
