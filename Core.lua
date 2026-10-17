@@ -46,6 +46,7 @@ SG.DB_DEFAULTS = {
     category = "leveling",
     selected = nil,
     gearTab = "quest",
+    profTab = "guides",
 }
 
 SG.CHAR_DEFAULTS = {
@@ -392,6 +393,9 @@ function SG.InitDB()
     if SG.db.gearTab ~= "quest" and SG.db.gearTab ~= "profession" and SG.db.gearTab ~= "auction" and SG.db.gearTab ~= "world" and SG.db.gearTab ~= "reputation" then
         SG.db.gearTab = "quest"
     end
+    if SG.db.profTab ~= "guides" and SG.db.profTab ~= "recipes" then
+        SG.db.profTab = "guides"
+    end
 end
 
 function SG.OnLogin()
@@ -450,6 +454,11 @@ function SG.OnLogin()
     if active and SG.db.category ~= "bis" then
         local index = SG.Engine.ShownIndex(active)
         if index then SG.Engine.Focus(active, index, true) end
+    end
+    if SG.db.category == "professions" and SG.db.profTab == "recipes" then
+        SG.state.tab = "prof-recipes"
+        SG.db.selected = "prof-recipes"
+        SG.state.stepIndex = nil
     end
     if assigned then SG.UI.Show() end
     local events = {

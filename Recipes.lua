@@ -1,5 +1,5 @@
--- Recipes.lua: where to buy or loot a recipe for a profession this character has.
--- Trainer recipes stay with the trainer. This list does not invent a vendor, a drop, or a price.
+-- Recipes.lua: where to buy, earn, or loot a recipe for a profession this character has.
+-- Trainer recipes stay with the trainer. This list does not invent a vendor, a quest, a drop, or a price.
 local _, SG = ...
 if type(SG) ~= "table" then
     SG = _G.Stratagem or {}
@@ -135,17 +135,32 @@ local function ZoneName(map)
     return nil
 end
 
-local function VendorText(recipe, side)
+local function Pin(map, x, y)
+    if type(map) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
+        return nil, nil, nil
+    end
+    return map, x, y
+end
+
+local function VendorSpots(recipe, side)
     local rows = recipe.vendors
+    local spots = {}
+    local function unnamed()
+        spots[#spots + 1] = {
+            text = "The recipe comes from a vendor. The list does not name them.",
+            tag = "Vendors",
+            order = 1,
+        }
+    end
     if type(rows) ~= "table" then
-        return "The recipe comes from a vendor. The list does not name them.", nil, nil, nil, nil
+        unnamed()
+        return spots
     end
     local other = false
     for i = 1, #rows do
         local row = rows[i]
         if type(row) == "table" and FactionOK(row[3], side) then
             local name = row[2]
-            local map, x, y = row[4], row[5], row[6]
             local bits = {}
             if type(name) == "string" and name ~= "" then
                 bits[#bits + 1] = "Buy the recipe from " .. name .. "."
@@ -157,16 +172,76 @@ local function VendorText(recipe, side)
             if type(recipe.rep) == "string" and recipe.rep ~= "" then
                 bits[#bits + 1] = "The list requires " .. recipe.rep .. "."
             end
-            if type(map) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
-                map, x, y = nil, nil, nil
-            end
-            return table.concat(bits, " "), map, x, y, ZoneName(map)
+            local map, x, y = Pin(row[4], row[5], row[6])
+            local place = ZoneName(map)
+            if place then bits[#bits + 1] = "The list places that in " .. place .. "." end
+            spots[#spots + 1] = {
+                text = table.concat(bits, " "),
+                map = map,
+                x = x,
+                y = y,
+                place = place,
+                tag = "Vendors",
+                order = 1,
+            }
         elseif type(row) == "table" and type(row[3]) == "string" and not FactionOK(row[3], side) then
             other = true
         end
     end
+    if #spots > 0 then return spots end
     if other then return nil end
-    return "The recipe comes from a vendor. The list does not name them.", nil, nil, nil, nil
+    unnamed()
+    return spots
+end
+
+local function QuestTitle(quest)
+    local name = quest.name
+    if type(name) == "string" and name ~= "" then return name end
+    local id = quest.id
+    if type(id) ~= "number" or not C_QuestLog or not C_QuestLog.GetTitleForQuestID then return nil end
+    local ok, title = pcall(C_QuestLog.GetTitleForQuestID, id)
+    if ok and type(title) == "string" and title ~= "" then return title end
+    return nil
+end
+
+local function QuestSpots(recipe, side)
+    local quests = recipe.quests
+    if type(quests) ~= "table" then return nil end
+    local spots = {}
+    for i = 1, #quests do
+        local quest = quests[i]
+        if type(quest) == "table" and FactionOK(quest.side, side) then
+            local title = QuestTitle(quest)
+            local npc = quest.npc
+            local giver = type(npc) == "table" and type(npc[2]) == "string" and npc[2] ~= "" and npc[2] or nil
+            local map, x, y
+            if type(npc) == "table" then map, x, y = Pin(npc[4], npc[5], npc[6]) end
+            local place = ZoneName(map)
+            local bits = {}
+            if title then
+                bits[#bits + 1] = "The recipe is a reward from " .. title .. "."
+            else
+                bits[#bits + 1] = "The recipe is a quest reward. The list does not name the quest."
+            end
+            if giver then bits[#bits + 1] = giver .. " gives that quest." end
+            if place then bits[#bits + 1] = "The list places that in " .. place .. "." end
+            local level = quest.level
+            if type(level) == "number" and level > 0 then
+                bits[#bits + 1] = "The list marks it level " .. level .. "."
+            end
+            spots[#spots + 1] = {
+                text = table.concat(bits, " "),
+                map = map,
+                x = x,
+                y = y,
+                place = place,
+                tag = "Quests",
+                order = 2,
+            }
+        end
+    end
+    if #spots == 0 then return nil end
+    return spots
 end
 
 local function DropText(recipe)
@@ -235,18 +310,130 @@ local function DropText(recipe)
     return "The recipe drops. The list does not name the mob.", nil
 end
 
-local function SourceOf(recipe, side)
-    if type(recipe) ~= "table" then return nil end
-    if recipe.source == "vendor" then
-        local text, map, x, y, place = VendorText(recipe, side)
-        if not text then return nil end
-        return text, map, x, y, place, "Vendor"
-    end
-    if recipe.source == "drop" then
-        local text, place = DropText(recipe)
-        return text, nil, nil, nil, place, "Drop"
+local function DropPlace(recipe)
+    local bosses = recipe.bosses
+    if type(bosses) ~= "table" then return nil end
+    for i = 1, #bosses do
+        local boss = bosses[i]
+        local place = type(boss) == "table" and AreaName(boss[2]) or nil
+        if place then return place end
     end
     return nil
+end
+
+local function DropSpot(recipe)
+    local text, named = DropText(recipe)
+    local place = DropPlace(recipe) or named
+    if type(place) ~= "string" or place == "" then place = nil end
+    return {
+        {
+            text = text,
+            place = place,
+            tag = "World Drops",
+            order = 3,
+        },
+    }
+end
+
+local function SpotsFor(recipe, side)
+    if type(recipe) ~= "table" then return nil end
+    if recipe.source == "vendor" then return VendorSpots(recipe, side) end
+    if recipe.source == "quest" then return QuestSpots(recipe, side) end
+    if recipe.source == "drop" then return DropSpot(recipe) end
+    return nil
+end
+
+local function Segment(profName, tag, place)
+    local head = profName .. " - " .. tag
+    if type(place) == "string" and place ~= "" then return head .. " - " .. place end
+    return head
+end
+
+local function MakeStep(recipe, spot, profName)
+    local recipeId = recipe.recipe
+    local name = ItemLabel(recipeId) or SpellLabel(recipe.spell) or "Recipe"
+    local skill = type(recipe.skill) == "number" and recipe.skill or 0
+    local text = spot.text or ""
+    if skill > 0 then text = text .. " It asks for skill " .. skill .. "." end
+    local step = {
+        kind = "recipe",
+        spell = recipe.spell,
+        optional = false,
+        match = "bis",
+        visible = true,
+        segment = Segment(profName, spot.tag, spot.place),
+        zone = profName,
+        level = skill > 0 and skill or 1,
+        title = name,
+        text = text,
+        baseText = text,
+        map = spot.map,
+        x = spot.x,
+        y = spot.y,
+    }
+    if skill > 0 then step.dropLine = "Skill " .. skill end
+    if type(recipeId) == "number" and recipeId > 0 then
+        step.rewards = { recipeId }
+        step.itemID = recipeId
+    end
+    return step
+end
+
+local function FinderBefore(a, b)
+    if a.rank ~= b.rank then return a.rank < b.rank end
+    if a.order ~= b.order then return a.order < b.order end
+    if a.place ~= b.place then return a.place < b.place end
+    if a.skill ~= b.skill then return a.skill < b.skill end
+    if a.spell ~= b.spell then return a.spell < b.spell end
+    return a.index < b.index
+end
+
+local function Fill(steps, note, guide, data, profs, side)
+    local rank = {}
+    for i = 1, #profs do rank[profs[i]] = i end
+    local found = {}
+    local n = 0
+    for p = 1, #profs do
+        local profId = profs[p]
+        local prof = data[profId]
+        if type(prof) == "table" and type(prof.recipes) == "table" then
+            local profName = SpellLabel(prof.skillSpell) or "Profession"
+            local here = rank[profId] or 99
+            for i = 1, #prof.recipes do
+                local recipe = prof.recipes[i]
+                local spots = SpotsFor(recipe, side)
+                if spots and type(recipe.spell) == "number" then
+                    local skill = type(recipe.skill) == "number" and recipe.skill or 0
+                    for s = 1, #spots do
+                        local spot = spots[s]
+                        n = n + 1
+                        found[#found + 1] = {
+                            rank = here,
+                            order = spot.order or 9,
+                            place = (type(spot.place) == "string" and spot.place) or "",
+                            skill = skill,
+                            spell = recipe.spell,
+                            index = n,
+                            step = MakeStep(recipe, spot, profName),
+                        }
+                    end
+                end
+            end
+        end
+    end
+    table.sort(found, FinderBefore)
+    local count = 0
+    for i = 1, #found do
+        steps[#steps + 1] = found[i].step
+        count = count + 1
+    end
+    if count == 0 then
+        note.visible = true
+        note.text = "None of your professions have a vendor, quest, or world-drop recipe on the loaded list."
+        note.baseText = note.text
+    end
+    guide.questCount = count
+    guide.visibleQuests = count
 end
 
 function SG.Recipes.Build()
@@ -258,7 +445,7 @@ function SG.Recipes.Build()
         category = "professions",
         side = "B",
         place = "Professions",
-        blurb = "Recipes a vendor sells, or that drop, for a profession this character has. Trainer recipes stay at the trainer. A learned recipe leaves the list. This does not level the profession for you.",
+        blurb = "Recipes a vendor sells, a quest rewards, or that drop in the world, for a profession this character has. Grouped by profession, then vendors, quests, or world drops, then the zone or dungeon the list names. Trainer recipes stay at the trainer. A learned recipe leaves the list. This does not level the profession for you.",
         min = 1,
         max = 60,
         steps = {},
@@ -281,8 +468,8 @@ function SG.Recipes.Build()
         zone = "Recipes",
         level = 1,
         title = "No recipes to find",
-        text = "No vendor or drop recipe is left for a profession you have.",
-        baseText = "No vendor or drop recipe is left for a profession you have.",
+        text = "No vendor, quest, or world-drop recipe is left for a profession you have.",
+        baseText = "No vendor, quest, or world-drop recipe is left for a profession you have.",
     }
     local steps = { note }
     local ns = Namespace()
@@ -295,84 +482,11 @@ function SG.Recipes.Build()
         note.visible = true
     elseif #profs == 0 then
         note.title = "No profession yet"
-        note.text = "Learn a profession. This list then names recipes a vendor sells, or that drop, so you can go find them."
+        note.text = "Learn a profession. This list then names recipes from vendors, quests, and world drops."
         note.baseText = note.text
         note.visible = true
     else
-        local rank = {}
-        for i = 1, #profs do rank[profs[i]] = i end
-        local groups, order = {}, {}
-        for p = 1, #profs do
-            local profId = profs[p]
-            local prof = data[profId]
-            if type(prof) == "table" and type(prof.recipes) == "table" then
-                local profName = SpellLabel(prof.skillSpell) or "Profession"
-                for i = 1, #prof.recipes do
-                    local recipe = prof.recipes[i]
-                    local text, map, x, y, place, tag = SourceOf(recipe, side)
-                    if text and type(recipe.spell) == "number" then
-                        local group = groups[profId]
-                        if not group then
-                            group = { title = profName, rank = rank[profId] or 99, steps = {} }
-                            groups[profId] = group
-                            order[#order + 1] = profId
-                        end
-                        local recipeId = recipe.recipe
-                        local name = ItemLabel(recipeId) or SpellLabel(recipe.spell) or "Recipe"
-                        local skill = type(recipe.skill) == "number" and recipe.skill or 0
-                        local skillNote = ""
-                        if skill > 0 then skillNote = " It asks for skill " .. skill .. "." end
-                        local step = {
-                            kind = "recipe",
-                            spell = recipe.spell,
-                            optional = false,
-                            match = "bis",
-                            visible = true,
-                            segment = profName,
-                            zone = profName,
-                            level = skill > 0 and skill or 1,
-                            title = name,
-                            text = text .. skillNote,
-                            baseText = text .. skillNote,
-                            dropLine = tag .. (skill > 0 and ("  Skill " .. skill) or ""),
-                            placeName = place,
-                            map = map,
-                            x = x,
-                            y = y,
-                        }
-                        if type(recipeId) == "number" and recipeId > 0 then
-                            step.rewards = { recipeId }
-                            step.itemID = recipeId
-                        end
-                        group.steps[#group.steps + 1] = step
-                    end
-                end
-            end
-        end
-        table.sort(order, function(a, b)
-            if groups[a].rank ~= groups[b].rank then return groups[a].rank < groups[b].rank end
-            if groups[a].title ~= groups[b].title then return groups[a].title < groups[b].title end
-            return a < b
-        end)
-        local count = 0
-        for i = 1, #order do
-            local group = groups[order[i]]
-            table.sort(group.steps, function(a, b)
-                if a.level ~= b.level then return a.level < b.level end
-                return (a.spell or 0) < (b.spell or 0)
-            end)
-            for s = 1, #group.steps do
-                steps[#steps + 1] = group.steps[s]
-                count = count + 1
-            end
-        end
-        if count == 0 then
-            note.visible = true
-            note.text = "None of your professions have a vendor or drop recipe on the loaded list."
-            note.baseText = note.text
-        end
-        guide.questCount = count
-        guide.visibleQuests = count
+        Fill(steps, note, guide, data, profs, side)
     end
     for i = 1, #steps do
         steps[i].index = i

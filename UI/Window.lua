@@ -176,6 +176,111 @@ local function PercentText(done, total)
     return string.format("%d%%", math.floor((done / total) * 100 + 0.5))
 end
 
+function SG.UI.OpenProfessionRecipes()
+    if not SG.db then return end
+    if not SG.UI.frame then SG.UI.Create() end
+    SG.db.profTab = "recipes"
+    SG.db.category = "professions"
+    SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
+    SG.state.tab = "prof-recipes"
+    SG.db.selected = "prof-recipes"
+    if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
+    local guide = SG.Engine and SG.Engine.Get and SG.Engine.Get("prof-recipes")
+    if guide and SG.Engine.Focus then
+        SG.Engine.Focus(guide, SG.Engine.ShownIndex(guide), true)
+    end
+    if SG.UI.frame then SG.UI.frame:Show() end
+    if SG.UI.Refresh then SG.UI.Refresh(true) end
+    if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+end
+
+function SG.UI.OpenProfessionGuides()
+    if not SG.db then return end
+    SG.db.profTab = "guides"
+    SG.db.category = "professions"
+    SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
+    SG.state.tab = "home"
+    if SG.UI.Refresh then SG.UI.Refresh(true) end
+end
+
+function SG.UI.SyncProfBar()
+    if SG.db and SG.db.category == "professions" and SG.state then
+        if SG.state.tab == "prof-recipes" then
+            SG.db.profTab = "recipes"
+        else
+            SG.db.profTab = "guides"
+        end
+    end
+    local bar = SG.UI.profBar
+    local on = SG.db and SG.db.category == "professions" and true or false
+    if bar then
+        if on then bar:Show() else bar:Hide() end
+    end
+    local offset = on and -36 or 0
+    if SG.UI.profOffset ~= offset and SG.UI.tabbar then
+        SG.UI.profOffset = offset
+        local tabbar = SG.UI.tabbar
+        if SG.UI.home then
+            SG.UI.home:ClearAllPoints()
+            SG.UI.home:SetPoint("TOPLEFT", tabbar, "BOTTOMLEFT", 0, offset)
+            SG.UI.home:SetPoint("BOTTOMRIGHT")
+        end
+        if SG.UI.steps then
+            SG.UI.steps:ClearAllPoints()
+            SG.UI.steps:SetPoint("TOPLEFT", tabbar, "BOTTOMLEFT", 0, offset)
+            SG.UI.steps:SetPoint("BOTTOMRIGHT")
+        end
+    end
+    local buttons = SG.UI.profTabButtons or {}
+    local selected = (SG.db and SG.db.profTab) or "guides"
+    for i = 1, #buttons do
+        local button = buttons[i]
+        button.kind = (button.profTab == selected) and "primary" or "ghost"
+        if button.Paint then button:Paint(false) end
+    end
+end
+
+function SG.UI.BuildProfBar(center)
+    local bar = CreateFrame("Frame", nil, center)
+    bar:SetPoint("TOPLEFT", SG.UI.tabbar, "BOTTOMLEFT", 8, -4)
+    bar:SetPoint("TOPRIGHT", SG.UI.tabbar, "BOTTOMRIGHT", -8, -4)
+    bar:SetHeight(28)
+    local level = center:GetFrameLevel() + 30
+    if SG.UI.home and SG.UI.home:GetFrameLevel() >= level then
+        level = SG.UI.home:GetFrameLevel() + 5
+    end
+    bar:SetFrameLevel(level)
+    bar:Hide()
+    local tabs = {
+        { id = "guides", label = "Guides", width = 72 },
+        { id = "recipes", label = "Recipes", width = 80 },
+    }
+    local buttons = {}
+    local previous
+    for i = 1, #tabs do
+        local info = tabs[i]
+        local button = SG.Widgets.Button(bar, info.label, "ghost")
+        button.profTab = info.id
+        button:SetSize(info.width, 28)
+        if i == 1 then
+            button:SetPoint("LEFT", 0, 0)
+        else
+            button:SetPoint("LEFT", previous, "RIGHT", 6, 0)
+        end
+        button:SetScript("OnClick", function(self)
+            if self.profTab == "recipes" then
+                SG.UI.OpenProfessionRecipes()
+            else
+                SG.UI.OpenProfessionGuides()
+            end
+        end)
+        buttons[i] = button
+        previous = button
+    end
+    SG.UI.profBar = bar
+    SG.UI.profTabButtons = buttons
+end
+
 function SG.UI.Create()
     if SG.UI.frame or not SG.db then return end
     SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
@@ -234,7 +339,9 @@ function SG.UI.Create()
         SG.state.query = text or ""
         if SG.db.category == "options" then SG.db.category = "leveling" end
         if SG.db.category ~= "leveling" and SG.db.category ~= "bis" then
-            SG.state.tab = "home"
+            if SG.db.category ~= "professions" or SG.state.tab ~= "prof-recipes" then
+                SG.state.tab = "home"
+            end
         end
         SG.UI.Refresh(true)
     end)
@@ -278,6 +385,9 @@ function SG.UI.Create()
                         SG.Engine.Focus(guide, SG.Engine.ShownIndex(guide), true)
                     end
                 end
+            elseif self.id == "professions" and SG.db.profTab == "recipes" then
+                SG.UI.OpenProfessionRecipes()
+                return
             elseif self.id ~= "options" then
                 SG.state.tab = "home"
             end
@@ -479,6 +589,7 @@ function SG.UI.Create()
     SG.UI.BuildOptions(options)
     SG.UI.BuildDetail(detail)
     SG.UI.BuildPicker(footer)
+    SG.UI.BuildProfBar(center)
 
     SG.UI.guidePool = {}
     SG.UI.headerPool = {}
@@ -928,6 +1039,9 @@ local function Header(parent)
     frame:SetHeight(26)
     local text = SG.Widgets.Text(frame, 11)
     text:SetPoint("LEFT", 8, 0)
+    text:SetPoint("RIGHT", -8, 0)
+    text:SetJustifyH("LEFT")
+    text:SetWordWrap(false)
     text:SetTextColor(SG.RGB(T.gold))
     frame.text = text
     return frame
@@ -1104,6 +1218,7 @@ local function Passes(guide, category, faction, query)
     elseif guide.category ~= category then
         return false
     end
+    if category == "professions" and guide.recipes then return false end
     if faction ~= "both" and guide.side ~= "B" and guide.side ~= faction then
         return false
     end
@@ -1622,6 +1737,7 @@ function SG.UI.Refresh(resetScroll)
         SG.state.tab = direct
         SG.db.selected = direct
     end
+    if SG.UI.SyncProfBar then SG.UI.SyncProfBar() end
 
     local optionsOn = SG.db.category == "options"
     if optionsOn then
@@ -1661,6 +1777,7 @@ function SG.UI.Refresh(resetScroll)
         SG.UI.home:Show()
         SG.UI.RefreshHome(resetScroll)
     end
+    if SG.UI.SyncProfBar then SG.UI.SyncProfBar() end
     SG.UI.RefreshDetail()
 end
 
