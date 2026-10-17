@@ -568,7 +568,7 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
     elseif event == "ADDON_LOADED" and SG.classToken and (
         arg1 == "NaowhForever" or arg1 == "NaowhForever_BiS" or arg1 == "NaowhForever_DungeonJournal"
-        or arg1 == "NaowhForever_Professions"
+        or arg1 == "NaowhForever_Professions" or arg1 == "NaowhForever_QoL"
         or arg1 == "NaowwahForever" or arg1 == "NaowwahForever_BiS" or arg1 == "NaowwahForever_Professions"
     ) then
         if SG.BiS and SG.BiS.Refresh then SG.BiS.Refresh() end
@@ -595,6 +595,7 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         if SG.Reputation and SG.Reputation.RefreshSoon then SG.Reputation.RefreshSoon() end
         if event == "SKILL_LINES_CHANGED" or event == "NEW_RECIPE_LEARNED" then
             if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
+            if SG.ProfPath and SG.ProfPath.Refresh then SG.ProfPath.Refresh() end
         end
         if event == "PLAYER_LEVEL_UP" and SG.Engine and SG.Engine.Active and SG.Engine.AimForward then
             SG.Engine.AimForward(SG.Engine.Active())

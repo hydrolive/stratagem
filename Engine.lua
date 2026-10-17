@@ -836,6 +836,7 @@ function SG.Engine.Rebuild()
         for i = 1, #list do add(list[i]) end
     end
     if SG.Recipes and SG.Recipes.Install then SG.Recipes.Install(true) end
+    if SG.ProfPath and SG.ProfPath.Install then SG.ProfPath.Install(true) end
     if SG.Reputation and SG.Reputation.Install then SG.Reputation.Install(true) end
 end
 
@@ -923,6 +924,10 @@ function SG.Engine.CurrentIndex(guide)
             end
         end
         return note
+    end
+    if guide.profPath and SG.ProfPath and SG.ProfPath.Current then
+        local picked = SG.ProfPath.Current(guide)
+        if picked then return picked end
     end
     for i = 1, #guide.steps do
         local step = guide.steps[i]
@@ -1136,6 +1141,10 @@ function SG.Engine.CatchUp(guide, fromSelection)
     if SG.RefreshQuestCache then SG.RefreshQuestCache() end
     if guide.gear and SG.Gear and SG.Gear.Filter then SG.Gear.Filter(guide) end
     if guide.recipes and SG.Recipes and SG.Recipes.Apply then SG.Recipes.Apply(guide) end
+    if guide.profPath and SG.ProfPath and SG.ProfPath.Prepare then
+        SG.ProfPath.Prepare(guide.id)
+        guide = SG.Engine.Get(guide.id) or guide
+    end
     if guide.reputation and SG.Reputation and SG.Reputation.Prepare then
         SG.Reputation.Prepare(guide.id)
         guide = SG.Engine.Get(guide.id) or guide
@@ -1170,6 +1179,11 @@ function SG.Engine.OnQuestUpdate()
         local before = active and SG.Engine.ShownIndex(active) or nil
         if SG.RefreshQuestCache then SG.RefreshQuestCache() end
         if active and active.gear and SG.Gear and SG.Gear.Filter then SG.Gear.Filter(active) end
+        if SG.ProfPath and SG.ProfPath.Apply and SG.Engine.guides then
+            for i = 1, #SG.Engine.guides do
+                if SG.Engine.guides[i].profPath then SG.ProfPath.Apply(SG.Engine.guides[i]) end
+            end
+        end
         if SG.db.options.autoAdvance then
             SG.Engine.SyncAll(true)
         elseif active then
