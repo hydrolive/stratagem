@@ -153,6 +153,60 @@ local function Instant(itemID)
     return nil
 end
 
+-- Forever fills C_Item. The older globals are absent or stay empty, which
+-- left every gear tab on "still loading" and then "nothing to upgrade".
+local function ClientItem(itemID)
+    if not itemID then return nil end
+    local function pack(ok, name, link, _, ilvl, req, _, _, _, _, _, _, _, _, bind)
+        if not ok or not name or not link then return nil end
+        return name, link, ilvl, req, bind
+    end
+    if C_Item and C_Item.GetItemInfo then
+        local name, link, ilvl, req, bind = pack(pcall(C_Item.GetItemInfo, itemID))
+        if name and link then return name, link, ilvl, req, bind end
+    end
+    if GetItemInfo then
+        local name, link, _, ilvl, req, _, _, _, _, _, _, _, _, bind = GetItemInfo(itemID)
+        if name and link then return name, link, ilvl, req, bind end
+    end
+    return nil
+end
+
+-- True once Forever says this id is in the client cache. A name alone is not
+-- enough: GetItemStats can hand back an empty table before that, and scoring
+-- that empty table made every filled slot look like it had no upgrade.
+local function ItemCached(itemID)
+    if not itemID then return false end
+    if C_Item and C_Item.IsItemDataCachedByID then
+        local ok, cached = pcall(C_Item.IsItemDataCachedByID, itemID)
+        if ok then return cached and true or false end
+    end
+    return ClientItem(itemID) and true or false
+end
+
+-- stats, answered. A table with numbers is the answer even before the cache
+-- flag flips. An empty table counts only after the item is cached. Before
+-- that it is still loading, not a score of 0.
+local function ClientStats(itemID, link)
+    local function take(fn, query)
+        if not fn or query == nil then return nil end
+        local ok, stats = pcall(fn, query)
+        if ok and type(stats) == "table" and next(stats) ~= nil then return stats end
+        return nil
+    end
+    local fn = C_Item and C_Item.GetItemStats
+    local query = itemID and ("item:" .. itemID) or nil
+    local stats = take(fn, query)
+    if not stats and type(link) == "string" then stats = take(fn, link) end
+    if not stats and GetItemStats then
+        stats = take(GetItemStats, query)
+        if not stats and type(link) == "string" then stats = take(GetItemStats, link) end
+    end
+    if stats then return stats, true end
+    if ItemCached(itemID) then return {}, true end
+    return nil, false
+end
+
 local function QuestLevel(questID)
     local quest = SG.BiS and SG.BiS.Quest(questID)
     local level = quest and quest.level
@@ -224,18 +278,8 @@ function SG.Gear.Fact(itemID)
         local name = SG.ItemName(itemID, true)
         if name then row.name = name end
     end
-    if row.ilvl == 0 and GetItemInfo and not row.asked then
-        row.asked = true
-        local _, _, _, ilvl, req = GetItemInfo(itemID)
-        if ilvl and ilvl > 0 then row.ilvl = ilvl end
-        if req and req > 0 then
-            row.req = req
-            row.reqKnown = true
-        elseif req == 0 then
-            row.req = 1
-            row.reqKnown = true
-        end
-    end
+    -- Do not call GetItemInfo here. Fact runs for the whole catalog, and that
+    -- queue is what kept the client from returning the items on the open tab.
     if row.equip == "INVTYPE_CLOAK" then row.subName = "Cloak" end
     if row.slot and SG.SLOT_NAME then row.slotName = SG.SLOT_NAME[row.slot] end
     return row
@@ -315,14 +359,12 @@ function SG.Gear.Usable(class, fact, level)
 end
 
 local function StatScore(itemID)
-    if not GetItemStats or not GetItemInfo then return 0 end
     local spec = SG.Specs and SG.Specs.Selected()
     local tokens = spec and SPEC_STATS[spec]
     if not tokens then return 0 end
-    local _, link = GetItemInfo(itemID)
-    if not link then return 0 end
-    local stats = GetItemStats(link)
-    if not stats then return 0 end
+    local _, link = ClientItem(itemID)
+    local stats = ClientStats(itemID, link)
+    if type(stats) ~= "table" then return 0 end
     local score = 0
     for i = 1, #tokens do
         local token = tokens[i]
@@ -673,7 +715,7 @@ function SG.Gear.OnItem(itemID, success)
     if not itemID or type(loads) ~= "table" then return end
     local state = loads[itemID]
     if state ~= "ask" and state ~= "miss" then return end
-    if success == true then
+    if success == true or ItemCached(itemID) then
         loads[itemID] = "ok"
     elseif success == false then
         loads[itemID] = "miss"
@@ -1456,8 +1498,8 @@ local function StatAmount(stats, token)
 end
 
 -- One request per item. "ask" is in flight, "ok" came back, "miss" will not.
--- The gear list only waits on "ask". A miss is left off the list.
--- A named item is not a miss. Score 0 waits until the client has answered.
+-- The gear list waits only while that item is still uncached. A miss is left off.
+-- Score 0 is a cached item whose stat table is empty.
 local LOAD_WAIT = 20
 local LOAD_BUDGET = 64
 
@@ -1478,18 +1520,20 @@ function SG.Gear.AskItem(itemID)
     if GetTime then SG.Gear.loadAt[itemID] = GetTime() end
     if C_Item and C_Item.RequestLoadItemDataByID then
         C_Item.RequestLoadItemDataByID(itemID)
+    elseif RequestLoadItemDataByID then
+        RequestLoadItemDataByID(itemID)
     end
-    if GetItemInfo then GetItemInfo(itemID) end
+    ClientItem(itemID)
 end
 
--- True only when an asked item still has no name after the wait.
--- A name means the item can still be scored.
+-- True when an asked item is still uncached after the wait.
+-- Cached items are scored, including a cached item with no stats.
 local function GaveUp(itemID)
     local loads = SG.Gear.loads
     local state = loads and loads[itemID]
     if state == "miss" then return true end
-    if state ~= "ask" then return false end
-    if GetItemInfo and GetItemInfo(itemID) then return false end
+    if state ~= "ask" and state ~= "ok" then return false end
+    if ItemCached(itemID) then return false end
     local at = SG.Gear.loadAt and SG.Gear.loadAt[itemID]
     if not at or not GetTime then return false end
     if (GetTime() - at) < LOAD_WAIT then return false end
@@ -1498,42 +1542,35 @@ local function GaveUp(itemID)
 end
 
 -- known is false while a request is in flight. failed is true when the client
--- will not return the item. A missing stats API stays pending. Score 0 is only
--- for an item the client already answered and that has no stat table.
+-- will not return the item. Score 0 is only for an item that is cached and
+-- whose stat table is empty. An empty table before that stays pending.
 local function SpecValue(itemID, allowAsk)
     if allowAsk == nil then allowAsk = true end
     if not itemID then return nil, false, true end
-    if not GetItemStats or not GetItemInfo then return nil, false, false end
+    local hasAPI = (C_Item and C_Item.GetItemStats) or GetItemStats
+    if not hasAPI then return nil, false, false end
     local spec = SG.Specs and SG.Specs.Selected()
     local tokens = spec and SPEC_STATS[spec]
     if not tokens then return nil, false, false end
-    local name, link = GetItemInfo(itemID)
-    local state = SG.Gear.loads and SG.Gear.loads[itemID]
-    if not name or not link then
-        if state == "miss" or GaveUp(itemID) then return nil, false, true end
-        if state == "ok" then
-            local at = SG.Gear.loadAt and SG.Gear.loadAt[itemID]
-            if not at or not GetTime then
-                if type(SG.Gear.loadAt) ~= "table" then SG.Gear.loadAt = {} end
-                if GetTime then SG.Gear.loadAt[itemID] = GetTime() end
-                return nil, false, false
-            end
-            if (GetTime() - at) < LOAD_WAIT then return nil, false, false end
-            if SG.Gear.loads then SG.Gear.loads[itemID] = "miss" end
-            return nil, false, true
+    local name, link, ilvl, req = ClientItem(itemID)
+    if name and SG.Gear.facts and SG.Gear.facts[itemID] then
+        local fact = SG.Gear.facts[itemID]
+        if ilvl and ilvl > 0 and (not fact.ilvl or fact.ilvl == 0) then fact.ilvl = ilvl end
+        if req and req > 0 and not fact.reqKnown then
+            fact.req = req
+            fact.reqKnown = true
         end
+    end
+    local stats, answered = ClientStats(itemID, link)
+    local state = SG.Gear.loads and SG.Gear.loads[itemID]
+    if not answered then
+        if state == "miss" or GaveUp(itemID) then return nil, false, true end
         if allowAsk then SG.Gear.AskItem(itemID) end
         state = SG.Gear.loads and SG.Gear.loads[itemID]
         if state == "miss" then return nil, false, true end
         return nil, false, false
     end
-    local stats = GetItemStats(link)
-    if type(stats) ~= "table" then
-        if state == "miss" then return nil, false, true end
-        if state == "ok" then return 0, true, false end
-        if allowAsk then SG.Gear.AskItem(itemID) end
-        return nil, false, false
-    end
+    if type(stats) ~= "table" then return 0, true, false end
     if state == "ask" and SG.Gear.loads then SG.Gear.loads[itemID] = "ok" end
     local score = 0
     for i = 1, #tokens do
@@ -1557,10 +1594,10 @@ end
 
 -- 0 none, 1 BoP, 2 BoE, 3 BoU, 4 quest. Nil means the client has not said.
 local function BindOf(itemID)
-    if not itemID or not GetItemInfo then return nil end
+    if not itemID then return nil end
     local fact = SG.Gear.facts and SG.Gear.facts[itemID]
     if fact and fact.bindKnown then return fact.bind end
-    local name, _, _, _, _, _, _, _, _, _, _, _, _, bind = GetItemInfo(itemID)
+    local name, _, _, _, bind = ClientItem(itemID)
     if not name then
         local state = SG.Gear.loads and SG.Gear.loads[itemID]
         if state ~= "ok" and state ~= "miss" then SG.Gear.AskItem(itemID) end

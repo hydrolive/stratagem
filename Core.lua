@@ -553,6 +553,7 @@ BINDING_NAME_STRATAGEM_TOGGLE = "Toggle Stratagem"
 SG.eventFrame = CreateFrame("Frame")
 SG.eventFrame:RegisterEvent("ADDON_LOADED")
 SG.eventFrame:RegisterEvent("PLAYER_LOGIN")
+SG.eventFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "ADDON_LOADED" and arg1 == SG.name then
         SG.InitDB()
