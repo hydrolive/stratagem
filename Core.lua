@@ -389,7 +389,7 @@ function SG.InitDB()
     if type(SG.char.progress) ~= "table" then SG.char.progress = {} end
     if type(SG.char.kills) ~= "table" then SG.char.kills = {} end
     if SG.db.category == "all" or SG.db.category == nil then SG.db.category = "leveling" end
-    if SG.db.gearTab ~= "quest" and SG.db.gearTab ~= "profession" and SG.db.gearTab ~= "auction" and SG.db.gearTab ~= "world" and SG.db.gearTab ~= "vendor" then
+    if SG.db.gearTab ~= "quest" and SG.db.gearTab ~= "profession" and SG.db.gearTab ~= "auction" and SG.db.gearTab ~= "world" then
         SG.db.gearTab = "quest"
     end
 end

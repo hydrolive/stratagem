@@ -544,6 +544,78 @@ local function ChainList(journal, root)
     return PrependAncestors(steps, seen)
 end
 
+-- Quests that lead to a gear reward. Follow-ups on row.steps are not included.
+-- Each entry is { id = number, alt = true or nil }. A missing journal is the root alone.
+function SG.Route.ChainTo(root)
+    if type(root) ~= "number" then return {} end
+    local journal = Journal()
+    if not journal then return { { id = root } } end
+    local steps, seen = {}, {}
+    local function add(step)
+        if type(step) == "table" then
+            local numeric = #step > 0
+            for i = 1, #step do
+                if type(step[i]) ~= "number" then numeric = false end
+            end
+            if numeric and #step > 1 then
+                local fresh = {}
+                for i = 1, #step do
+                    if not seen[step[i]] then
+                        fresh[#fresh + 1] = step[i]
+                        seen[step[i]] = true
+                    end
+                end
+                if #fresh > 0 then steps[#steps + 1] = fresh end
+                return
+            end
+            for i = 1, #step do add(step[i]) end
+            return
+        end
+        if type(step) ~= "number" or seen[step] then return end
+        seen[step] = true
+        steps[#steps + 1] = step
+    end
+    local row = JournalQuestRow(journal, root)
+    if row and type(row.lead) == "table" then
+        for i = 1, #row.lead do add(row.lead[i]) end
+    end
+    local pre = journal.QuestPrereqs and journal.QuestPrereqs[root]
+    local series = journal.QuestChains and journal.QuestChains[root]
+    if type(pre) == "table" then
+        for i = 1, #pre do add(pre[i]) end
+    end
+    if type(series) == "table" then
+        for i = 1, #series do add(series[i]) end
+    end
+    add(root)
+    if #steps == 0 then steps[1] = root end
+    steps = PrependAncestors(steps, seen)
+    local flat = {}
+    local function emit(step, alt)
+        if type(step) == "number" then
+            if alt then
+                flat[#flat + 1] = { id = step, alt = true }
+            else
+                flat[#flat + 1] = { id = step }
+            end
+            return
+        end
+        if type(step) ~= "table" then return end
+        local numeric = #step > 1
+        for i = 1, #step do
+            if type(step[i]) ~= "number" then numeric = false end
+        end
+        if numeric then
+            for i = 1, #step do emit(step[i], true) end
+            return
+        end
+        for i = 1, #step do emit(step[i], alt) end
+    end
+    for i = 1, #steps do emit(steps[i], false) end
+    if #flat == 0 then return { { id = root } } end
+    return flat
+end
+
 local function ChainQuest(journal, id, level)
     local known = SG.BiS.Quest(id)
     if known then return known end

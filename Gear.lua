@@ -707,7 +707,6 @@ function SG.Gear.Start()
     SG.Gear.facts = {}
     SG.Gear.loads = {}
     SG.Gear.loadAt = {}
-    SG.Gear.byVendor = {}
     SG.Gear.ready = false
     local ItemDB = _G.ItemDB
     if not ItemDB or not ItemDB.GetAllIds or not ItemDB.questRewards or not ItemDB.class then
@@ -737,10 +736,6 @@ function SG.Gear.Start()
                         AddReward(rewards[r], itemID)
                     end
                 end
-                if ItemDB.vendors then
-                    local vendors = CopyNpcIds(ItemDB.vendors(itemID))
-                    if #vendors > 0 then SG.Gear.byVendor[itemID] = vendors end
-                end
             end
         end
         index = last + 1
@@ -767,7 +762,7 @@ end
 local AHEAD = 3
 local SOURCE_SEP = " \194\183 "
 
-local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Vendors. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Vendors lists gear a vendor sells. When a slot is empty, that tab keeps the best vendor piece for the slot. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
+local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, and World Drops. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. A quest reward that is an upgrade lists the earlier quests in that chain under one Chain header. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
 
 local function Namespace()
     return SG.BiS and SG.BiS.ns or nil
@@ -907,118 +902,6 @@ local function IsAuction(src)
     return type(src) == "string" and src:lower():find("auction", 1, true) ~= nil
 end
 
-local function IsReputation(src)
-    return type(src) == "string" and src:lower():find("reputation", 1, true) ~= nil
-end
-
-local function CopyNpcIds(list)
-    local copy = {}
-    if type(list) ~= "table" then return copy end
-    if #list > 0 then
-        for i = 1, #list do
-            local id = list[i]
-            if type(id) == "number" and id > 0 then copy[#copy + 1] = id end
-        end
-        return copy
-    end
-    for _, id in pairs(list) do
-        if type(id) == "number" and id > 0 then copy[#copy + 1] = id end
-    end
-    table.sort(copy)
-    return copy
-end
-
--- Questie spawn zones are area ids. The ui map is the loaded zone table.
--- Nil until QuestieDB is loaded. false means the table was there and failed.
-function SG.Gear.AreaMaps()
-    if type(SG.Gear.areas) == "table" then return SG.Gear.areas end
-    if SG.Gear.areas == false then return nil end
-    local lib = _G.LibQuestieDB
-    local support = lib and lib.Support
-    if not support or not support.Get then return nil end
-    local ok, zone = pcall(support.Get, "ZoneDB")
-    if not ok or type(zone) ~= "table" or type(zone.private) ~= "table" then return nil end
-    local data = zone.private.areaIdToUiMapId
-    if type(data) ~= "string" or data == "" or not loadstring then
-        if type(data) == "string" then SG.Gear.areas = false end
-        return nil
-    end
-    local fn = loadstring(data)
-    if type(fn) ~= "function" then
-        SG.Gear.areas = false
-        return nil
-    end
-    local ran, parsed = pcall(fn)
-    if not ran or type(parsed) ~= "table" then
-        SG.Gear.areas = false
-        return nil
-    end
-    SG.Gear.areas = parsed
-    return parsed
-end
-
-local function MapPoint(px, py)
-    if type(px) ~= "number" or type(py) ~= "number" then return nil end
-    if px == -1 and py == -1 then return nil end
-    if px >= 0 and px <= 1 and py >= 0 and py <= 1 and (px > 0 or py > 0) then
-        px, py = px * 100, py * 100
-    end
-    if px <= 0 or py <= 0 or px > 100 or py > 100 then return nil end
-    return px, py
-end
-
--- name, map, x, y when this NPC can sell to the player's faction.
--- Nil when the NPC is the other faction. A missing pin still returns the name.
-local function VendorPin(npcID, side)
-    if type(npcID) ~= "number" or not side then return nil end
-    local NpcDB = _G.NpcDB
-    if not NpcDB then return nil end
-    local faction
-    if NpcDB.friendlyToFaction then
-        local ok, value = pcall(NpcDB.friendlyToFaction, npcID)
-        if ok then faction = value end
-    end
-    if faction == "A" or faction == "H" then
-        if faction ~= side then return nil end
-    end
-    local name
-    if NpcDB.name then
-        local ok, value = pcall(NpcDB.name, npcID)
-        if ok and type(value) == "string" and value ~= "" then name = value end
-    end
-    local map, x, y
-    if NpcDB.spawns then
-        local ok, spawns = pcall(NpcDB.spawns, npcID)
-        if ok and type(spawns) == "table" then
-            local maps = SG.Gear.AreaMaps()
-            local bestArea, point
-            for area, rows in pairs(spawns) do
-                if type(area) == "number" and type(rows) == "table" and #rows > 0 then
-                    local found
-                    for i = 1, #rows do
-                        if type(rows[i]) == "table" and MapPoint(rows[i][1], rows[i][2]) then
-                            found = rows[i]
-                            break
-                        end
-                    end
-                    if found and (not bestArea or area < bestArea) then
-                        bestArea = area
-                        point = found
-                    end
-                end
-            end
-            if type(point) == "table" then
-                local px, py = MapPoint(point[1], point[2])
-                local ui = maps and bestArea and maps[bestArea]
-                if px and type(ui) == "number" and ui > 0 then
-                    map, x, y = ui, px, py
-                end
-            end
-        end
-    end
-    return name, map, x, y, true
-end
-
 -- rows are { id, name, faction, map, x, y } from the profession data.
 local function PersonPin(rows, side)
     if type(rows) ~= "table" then return nil end
@@ -1093,6 +976,129 @@ local function BlankStep()
         match = "bis",
         visible = true,
     }
+end
+
+local function QuestPlace(questID)
+    local name, quest = QuestTitle(questID)
+    local level = QuestLevel(questID)
+    local map, x, y, where
+    if quest then
+        map, x, y, where = quest.map, quest.x, quest.y, quest.where
+    end
+    if SG.Route and SG.Route.StartOf then
+        local smap, sx, sy, swhere = SG.Route.StartOf(questID)
+        if not (map and x and y) and smap and sx and sy then
+            map, x, y = smap, sx, sy
+        end
+        if type(swhere) == "string" and swhere ~= "" then
+            if type(where) ~= "string" or where == "" then where = swhere end
+        end
+    end
+    local zone = ZoneName(quest, where)
+    local giver = SG.Engine and SG.Engine.Giver and SG.Engine.Giver(where) or nil
+    local from = (giver and giver ~= "") and (" from " .. giver) or ""
+    local inZone = (zone ~= "Quests") and (" in " .. zone) or ""
+    return name, level, map, x, y, zone, from, inZone
+end
+
+local function CopyNames(list)
+    if not list or #list == 0 then return nil end
+    local copy = {}
+    for i = 1, #list do copy[i] = list[i] end
+    return copy
+end
+
+-- Lead-in quests for a reward that can be gear. One step per named quest.
+-- An earlier gear reward splits the chain, so a quest is listed once.
+local function ExpandChains(raw, gearQuests, side, class)
+    if not SG.Route or not SG.Route.ChainTo then return raw end
+    local leads = {}
+    local used = {}
+    for id in pairs(gearQuests) do used[id] = true end
+    for i = 1, #raw do
+        local step = raw[i]
+        if step.sourceKind == "quest" and step.questID then
+            local root = step.questID
+            local flat = SG.Route.ChainTo(root)
+            if type(flat) == "table" then
+                local startAt = 1
+                for n = 1, #flat do
+                    local entry = flat[n]
+                    local qid = entry and entry.id
+                    if qid and qid ~= root and gearQuests[qid] then
+                        startAt = n + 1
+                    end
+                end
+                local group = {}
+                for n = startAt, #flat do
+                    local entry = flat[n]
+                    local qid = entry and entry.id
+                    if qid and qid ~= root and not used[qid] and QuestAllowed(qid, side, class) then
+                        local name, level, map, x, y, zone, from, inZone = QuestPlace(qid)
+                        if name then
+                            used[qid] = true
+                            group[#group + 1] = {
+                                id = qid,
+                                alt = entry.alt,
+                                name = name,
+                                level = level,
+                                map = map,
+                                x = x,
+                                y = y,
+                                zone = zone,
+                                from = from,
+                                inZone = inZone,
+                            }
+                        end
+                    end
+                end
+                if #group > 0 then
+                    local rewardName = step.questName or "the reward"
+                    local prior = {}
+                    local header = "Chain: " .. rewardName
+                    for g = 1, #group do
+                        local row = group[g]
+                        local lead = BlankStep()
+                        lead.sourceKind = "quest"
+                        lead.questID = row.id
+                        lead.questName = row.name
+                        lead.level = row.level
+                        lead.chainLead = true
+                        lead.chainGroup = root
+                        if row.alt then lead.chainAlt = true end
+                        lead.chainPos = g
+                        lead.map, lead.x, lead.y = row.map, row.x, row.y
+                        if row.zone ~= "Quests" then lead.placeName = row.zone end
+                        lead.segment = header
+                        lead.zone = header
+                        lead.title = row.name
+                        local alt = ""
+                        if row.alt then
+                            alt = " The chain lists this beside other quests. Complete one."
+                        end
+                        lead.baseText = string.format(
+                            "Pick up %s%s%s. This leads to %s.%s",
+                            row.name, row.from, row.inZone, rewardName, alt
+                        )
+                        lead.text = lead.baseText
+                        if g > 1 then lead.chainPrior = CopyNames(prior) end
+                        prior[#prior + 1] = row.name
+                        leads[#leads + 1] = lead
+                    end
+                    step.chainGroup = root
+                    step.chainPos = #group + 1
+                    step.chainPrior = CopyNames(prior)
+                    step.segment = header
+                    step.zone = header
+                end
+            end
+        end
+    end
+    if #leads == 0 then return raw end
+    local out = {}
+    for i = 1, #leads do out[#out + 1] = leads[i] end
+    for i = 1, #raw do out[#out + 1] = raw[i] end
+    return out
 end
 
 function SG.Gear.Build(side)
@@ -1211,6 +1217,7 @@ function SG.Gear.Build(side)
             end
         end
     end
+    raw = ExpandChains(raw, seenQuest, side, class)
 
     local journal = ns and ns.Journal
     if journal and journal.Dungeons then
@@ -1337,95 +1344,10 @@ function SG.Gear.Build(side)
         end
     end
 
-    local vendorItems = {}
-    local function addVendor(itemID, note, map, x, y, vendorName)
-        if vendorItems[itemID] or questItems[itemID] or dungeonItems[itemID] or craftItems[itemID] then return end
-        local fact = SG.Gear.Fact(itemID)
-        if not fact or not fact.slot or (fact.ilvl or 0) <= 0 or not WearLevel(class, fact) then return end
-        vendorItems[itemID] = true
-        local step = BlankStep()
-        step.sourceKind = "vendor"
-        step.itemID = itemID
-        step.gearItem = itemID
-        step.allRewards = { itemID }
-        step.rewards = { itemID }
-        step.vendorNote = note
-        step.vendorName = vendorName
-        step.level = ContentLevel(fact, class, nil)
-        step.segment = (vendorName and vendorName ~= "") and vendorName or "Vendors"
-        step.zone = step.segment
-        step.map, step.x, step.y = map, x, y
-        if map and C_Map and C_Map.GetMapInfo then
-            local info = C_Map.GetMapInfo(map)
-            if type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
-                step.placeName = info.name
-            end
-        end
-        step.title = "(Optional) " .. step.segment
-        step.baseText = note
-        step.text = note
-        raw[#raw + 1] = step
-    end
-
-    local sold = SG.Gear.byVendor
-    if type(sold) == "table" then
-        for itemID, npcs in pairs(sold) do
-            if type(npcs) == "table" and #npcs > 0 then
-                local name, map, x, y, allowed
-                if not _G.NpcDB then
-                    allowed = true
-                else
-                    for i = 1, #npcs do
-                        local n, m, px, py, ok = VendorPin(npcs[i], side)
-                        if ok then
-                            allowed = true
-                            if not name and n then name = n end
-                            if m and not map then
-                                map, x, y = m, px, py
-                            end
-                            if name and map then break end
-                        end
-                    end
-                end
-                if allowed then
-                    local note
-                    if name then
-                        note = "Buy it from " .. name .. "."
-                    else
-                        note = "Buy it from a vendor. The list does not name them."
-                    end
-                    if IsReputation(sourceText[itemID]) then
-                        note = note .. " " .. sourceText[itemID] .. "."
-                    end
-                    addVendor(itemID, note, map, x, y, name)
-                end
-            end
-        end
-    end
-    local spots = ns and ns.BiSSpots
-    if type(spots) == "table" then
-        for itemID, spot in pairs(spots) do
-            if type(itemID) == "number" and type(spot) == "table" and spot.sells then
-                local name = type(spot.name) == "string" and spot.name ~= "" and spot.name or nil
-                local note = name and ("Buy it from " .. name .. ".") or "Buy it from a vendor. The list does not name them."
-                local map, x, y = spot.map, spot.x, spot.y
-                if type(map) ~= "number" or type(x) ~= "number" or type(y) ~= "number" then
-                    map, x, y = nil, nil, nil
-                end
-                addVendor(itemID, note, map, x, y, name)
-            end
-        end
-    end
-    for itemID, src in pairs(sourceText) do
-        if IsReputation(src) then
-            addVendor(itemID, "Buy it. " .. src .. ".", nil, nil, nil, nil)
-        end
-    end
-
     for itemID, src in pairs(sourceText) do
         local auction = IsAuction(src)
         local world = IsWorld(src)
-        if (auction or world) and not questItems[itemID] and not dungeonItems[itemID] and not craftItems[itemID] and not vendorItems[itemID] then
+        if (auction or world) and not questItems[itemID] and not dungeonItems[itemID] and not craftItems[itemID] then
             local fact = SG.Gear.Fact(itemID)
             if fact and fact.slot and (fact.ilvl or 0) > 0 and WearLevel(class, fact) then
                 local step = BlankStep()
@@ -1474,6 +1396,10 @@ function SG.Gear.Build(side)
     for i = 1, #order do
         local group = groups[order[i]]
         table.sort(group.steps, function(a, b)
+            if a.chainGroup and a.chainGroup == b.chainGroup then
+                local ap, bp = a.chainPos or 0, b.chainPos or 0
+                if ap ~= bp then return ap < bp end
+            end
             if a.level ~= b.level then return a.level < b.level end
             local aq, bq = a.questID or 0, b.questID or 0
             if aq ~= bq then return aq < bq end
@@ -1531,8 +1457,9 @@ end
 
 -- One request per item. "ask" is in flight, "ok" came back, "miss" will not.
 -- The gear list only waits on "ask". A miss is left off the list.
-local LOAD_WAIT = 8
-local LOAD_BUDGET = 48
+-- A named item is not a miss. Score 0 waits until the client has answered.
+local LOAD_WAIT = 20
+local LOAD_BUDGET = 64
 
 function SG.Gear.AskItem(itemID)
     if not itemID or SG.Gear.deferLoads then return end
@@ -1543,24 +1470,26 @@ function SG.Gear.AskItem(itemID)
     end
     local state = loads[itemID]
     if state == "ask" or state == "ok" or state == "miss" then return end
-    if not C_Item or not C_Item.RequestLoadItemDataByID then
-        loads[itemID] = "miss"
-        return
-    end
     local budget = SG.Gear.loadBudget
     if type(budget) == "number" and budget <= 0 then return end
     if type(budget) == "number" then SG.Gear.loadBudget = budget - 1 end
     loads[itemID] = "ask"
     if type(SG.Gear.loadAt) ~= "table" then SG.Gear.loadAt = {} end
     if GetTime then SG.Gear.loadAt[itemID] = GetTime() end
-    C_Item.RequestLoadItemDataByID(itemID)
+    if C_Item and C_Item.RequestLoadItemDataByID then
+        C_Item.RequestLoadItemDataByID(itemID)
+    end
+    if GetItemInfo then GetItemInfo(itemID) end
 end
 
+-- True only when an asked item still has no name after the wait.
+-- A name means the item can still be scored.
 local function GaveUp(itemID)
     local loads = SG.Gear.loads
     local state = loads and loads[itemID]
     if state == "miss" then return true end
     if state ~= "ask" then return false end
+    if GetItemInfo and GetItemInfo(itemID) then return false end
     local at = SG.Gear.loadAt and SG.Gear.loadAt[itemID]
     if not at or not GetTime then return false end
     if (GetTime() - at) < LOAD_WAIT then return false end
@@ -1569,10 +1498,12 @@ local function GaveUp(itemID)
 end
 
 -- known is false while a request is in flight. failed is true when the client
--- will not return the item. A cached item with none of this spec's stats is 0.
+-- will not return the item. A missing stats API stays pending. Score 0 is only
+-- for an item the client already answered and that has no stat table.
 local function SpecValue(itemID, allowAsk)
     if allowAsk == nil then allowAsk = true end
-    if not GetItemStats or not GetItemInfo or not itemID then return nil, false, true end
+    if not itemID then return nil, false, true end
+    if not GetItemStats or not GetItemInfo then return nil, false, false end
     local spec = SG.Specs and SG.Specs.Selected()
     local tokens = spec and SPEC_STATS[spec]
     if not tokens then return nil, false, false end
@@ -1582,11 +1513,14 @@ local function SpecValue(itemID, allowAsk)
         if state == "miss" or GaveUp(itemID) then return nil, false, true end
         if state == "ok" then
             local at = SG.Gear.loadAt and SG.Gear.loadAt[itemID]
-            if not at or not GetTime or (GetTime() - at) >= LOAD_WAIT then
-                if SG.Gear.loads then SG.Gear.loads[itemID] = "miss" end
-                return nil, false, true
+            if not at or not GetTime then
+                if type(SG.Gear.loadAt) ~= "table" then SG.Gear.loadAt = {} end
+                if GetTime then SG.Gear.loadAt[itemID] = GetTime() end
+                return nil, false, false
             end
-            return nil, false, false
+            if (GetTime() - at) < LOAD_WAIT then return nil, false, false end
+            if SG.Gear.loads then SG.Gear.loads[itemID] = "miss" end
+            return nil, false, true
         end
         if allowAsk then SG.Gear.AskItem(itemID) end
         state = SG.Gear.loads and SG.Gear.loads[itemID]
@@ -1595,12 +1529,8 @@ local function SpecValue(itemID, allowAsk)
     end
     local stats = GetItemStats(link)
     if type(stats) ~= "table" then
-        if state == "miss" or GaveUp(itemID) then return 0, true, false end
-        if state == "ok" then
-            local at = SG.Gear.loadAt and SG.Gear.loadAt[itemID]
-            if not at or not GetTime or (GetTime() - at) >= LOAD_WAIT then return 0, true, false end
-            return nil, false, false
-        end
+        if state == "miss" then return nil, false, true end
+        if state == "ok" then return 0, true, false end
         if allowAsk then SG.Gear.AskItem(itemID) end
         return nil, false, false
     end
@@ -1630,7 +1560,6 @@ local function BindOf(itemID)
     if not itemID or not GetItemInfo then return nil end
     local fact = SG.Gear.facts and SG.Gear.facts[itemID]
     if fact and fact.bindKnown then return fact.bind end
-    if GaveUp(itemID) then return nil end
     local name, _, _, _, _, _, _, _, _, _, _, _, _, bind = GetItemInfo(itemID)
     if not name then
         local state = SG.Gear.loads and SG.Gear.loads[itemID]
@@ -1796,7 +1725,7 @@ end
 
 local function GearTab()
     local tab = SG.db and SG.db.gearTab
-    if tab == "profession" or tab == "auction" or tab == "world" or tab == "vendor" then return tab end
+    if tab == "profession" or tab == "auction" or tab == "world" then return tab end
     return "quest"
 end
 
@@ -1830,10 +1759,6 @@ local function AssignTab(step, profs)
     if kind == "auction" then
         step.gearTab = "auction"
         step.boe = true
-        return true
-    end
-    if kind == "vendor" then
-        step.gearTab = "vendor"
         return true
     end
     if kind ~= "craft" then return false end
@@ -1943,7 +1868,6 @@ local TAB_EMPTY = {
     profession = "No craft from a profession you have in the next %d levels beats what you have on for %s. A bind-on-pickup craft stays off until you have that profession.",
     auction = "No auction house upgrade in the next %d levels beats what you have on for %s. This tab is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops.",
     world = "No world drop or dungeon drop in the next %d levels beats what you have on for %s.",
-    vendor = "No vendor upgrade in the next %d levels beats what you have on for %s. When a slot is empty, the list keeps the best piece a vendor sells for that slot.",
 }
 
 local function Why(pick)
@@ -1953,19 +1877,6 @@ local function Why(pick)
     end
     if pick.wornName and pick.wornName ~= "" then return " It replaces " .. pick.wornName .. "." end
     return " It is better for this spec than what you already have."
-end
-
-local function PreferEmptyVendor(pick, prev)
-    local cand = {
-        score = pick.score, known = true, armor = pick.armor, ilvl = pick.ilvl, itemID = pick.itemID,
-    }
-    local other = {
-        score = prev.score, known = true, armor = prev.armor, ilvl = prev.ilvl, itemID = prev.itemID,
-    }
-    local beats = Beats(cand, other)
-    if beats then return true end
-    if beats == nil or Beats(other, cand) then return false end
-    return (pick.itemID or 0) < (prev.itemID or 0)
 end
 
 local function PreferPick(prev, pick)
@@ -1988,7 +1899,6 @@ local function MaybeThisTab(step, tab, profs)
     local kind = step.sourceKind
     if kind == "quest" then return tab == "quest" end
     if kind == "dungeon" then return tab == "world" end
-    if kind == "vendor" then return tab == "vendor" end
     if kind == "auction" then return tab == "auction" end
     if kind == "craft" then
         if tab == "profession" then
@@ -2123,11 +2033,6 @@ local function WritePick(step, pick, playerLevel)
         end
         step.title = "(Optional) " .. slot .. ": " .. name
         step.text = "(Optional) " .. line .. equip .. why
-    elseif step.sourceKind == "vendor" then
-        local line = step.vendorNote or "Buy it from a vendor. The list does not name them."
-        step.dropLine = line
-        step.title = "(Optional) " .. slot .. ": " .. name
-        step.text = "(Optional) " .. line .. equip .. why
     else
         step.title = "(Optional) " .. (step.questName or "Quest") .. ": " .. name
         local kind = pick.bis and "Level BiS" or "Upgrade"
@@ -2144,6 +2049,39 @@ local function WritePick(step, pick, playerLevel)
     step.baseText = step.baseText or step.text
     if step.sourceKind ~= "quest" then step.baseText = step.text end
     step.rewards = { pick.itemID }
+end
+
+-- A chain lead stays hidden until that reward is an upgrade on this tab.
+-- Turned-in leads stay listed and done. They do not set skip.
+local function ApplyChains(guide, row)
+    local rewardAt = {}
+    local steps = guide.steps
+    for i = 1, #steps do
+        local step = steps[i]
+        if step.chainGroup and not step.chainLead and step.visible and step.gearState == "show" then
+            rewardAt[step.chainGroup] = i
+        end
+    end
+    for i = 1, #steps do
+        local step = steps[i]
+        local at = step.chainLead and step.chainGroup and rewardAt[step.chainGroup]
+        if at and i < at then
+            step.visible = true
+            if TurnedIn(step.questID) then
+                step.gearState = "done"
+                if row and row.hold ~= i then
+                    row.done[i] = true
+                    row.skip[i] = nil
+                end
+            else
+                step.gearState = "show"
+                if row and row.skip[i] and row.hold ~= i then
+                    row.done[i] = nil
+                    row.skip[i] = nil
+                end
+            end
+        end
+    end
 end
 
 function SG.Gear.Filter(guide)
@@ -2221,7 +2159,9 @@ function SG.Gear.Filter(guide)
     local surveyed = {}
     for i = 1, #guide.steps do
         local step = guide.steps[i]
-        if not step.gearNote and class then
+        if step.chainLead then
+            -- No item. Shown later only when the reward on this tab is an upgrade.
+        elseif not step.gearNote and class then
             local info = Survey(step, class, playerLevel, ownedGear, tab, profs)
             surveyed[i] = info
             for n = 1, #info.now do
@@ -2241,7 +2181,9 @@ function SG.Gear.Filter(guide)
     local waiting = false
     for i = 1, #guide.steps do
         local step = guide.steps[i]
-        if not step.gearNote then
+        if step.chainLead then
+            mark(i, step, "wait")
+        elseif not step.gearNote then
             local info = surveyed[i]
             local pick = info and info.pick
             -- A turned-in quest cannot be picked up again, even when the
@@ -2281,13 +2223,7 @@ function SG.Gear.Filter(guide)
             elseif info.ownedOpen or (info.wearable and not info.anyBetter) then
                 AssignTab(step, profs)
                 if OnGearTab(step, tab) then
-                    -- A vendor piece that is not an upgrade stays off the count.
-                    -- Owning that piece still closes its line.
-                    if step.sourceKind == "vendor" and not info.ownedOpen then
-                        mark(i, step, "aside")
-                    else
-                        mark(i, step, "auto")
-                    end
+                    mark(i, step, "auto")
                 else
                     mark(i, step, "aside")
                 end
@@ -2296,32 +2232,7 @@ function SG.Gear.Filter(guide)
             end
         end
     end
-    local bestEmpty = {}
-    for i = 1, #guide.steps do
-        local step = guide.steps[i]
-        if step.visible and step.sourceKind == "vendor" then
-            local info = surveyed[i]
-            local pick = info and info.pick
-            if pick and pick.empty and pick.fact then
-                local slot = pick.fact.slot
-                local prev = bestEmpty[slot]
-                if not prev or PreferEmptyVendor(pick, prev.pick) then
-                    bestEmpty[slot] = { index = i, pick = pick }
-                end
-            end
-        end
-    end
-    for i = 1, #guide.steps do
-        local step = guide.steps[i]
-        if step.visible and step.sourceKind == "vendor" then
-            local info = surveyed[i]
-            local pick = info and info.pick
-            if pick and pick.empty and pick.fact then
-                local best = bestEmpty[pick.fact.slot]
-                if best and best.index ~= i then mark(i, step, "aside") end
-            end
-        end
-    end
+    ApplyChains(guide, row)
     any = false
     for i = 1, #guide.steps do
         local step = guide.steps[i]
