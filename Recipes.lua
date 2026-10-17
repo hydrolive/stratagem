@@ -244,13 +244,307 @@ local function QuestSpots(recipe, side)
     return spots
 end
 
-local function DropText(recipe)
+local function DropTail(recipe)
     local extra = {}
     if recipe.chests then extra[#extra + 1] = "chests" end
     if recipe.fished then extra[#extra + 1] = "fishing" end
     if recipe.pickpocket then extra[#extra + 1] = "pickpocketing" end
-    local tail = ""
-    if #extra > 0 then tail = " The list also names " .. table.concat(extra, ", ") .. "." end
+    if #extra == 0 then return "" end
+    return " The list also names " .. table.concat(extra, ", ") .. "."
+end
+
+local function MobPhrase(mob)
+    local name = mob[1]
+    local pct = mob[2]
+    local tag = mob[4]
+    local who = type(name) == "string" and name ~= "" and name or nil
+    local rate = type(pct) == "number" and (TrimPercent(pct) .. "%") or nil
+    if tag == "s" then
+        if who and rate then return who .. " (seen, classic list " .. rate .. ")" end
+        if who then return who .. " (seen, no percent)" end
+        return "an unnamed creature (seen, no percent)"
+    end
+    if tag == "q" then
+        if who then return who .. " (Questie, no percent)" end
+        return nil
+    end
+    if who and rate then return who .. " (classic list " .. rate .. ")" end
+    if who then return who .. " (no percent)" end
+    return nil
+end
+
+local function ZoneTitle(row)
+    local stored = row[1]
+    local map = row[2]
+    if type(map) == "number" and C_Map and C_Map.GetMapInfo then
+        local info = C_Map.GetMapInfo(map)
+        if type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
+            return info.name
+        end
+    end
+    if type(stored) == "string" and stored ~= "" then return stored end
+    return nil
+end
+
+local function ShownMobs(mobs, side)
+    local out = {}
+    if type(mobs) ~= "table" then return out end
+    for i = 1, #mobs do
+        local mob = mobs[i]
+        local fac = type(mob) == "table" and mob[3] or nil
+        if type(mob) == "table" and (type(fac) ~= "string" or fac == "" or not string.find(fac, side, 1, true)) then
+            out[#out + 1] = mob
+        end
+    end
+    return out
+end
+
+local function GuideLine(row, shown, place)
+    local bits = {}
+    for i = 1, #shown do
+        local phrase = MobPhrase(shown[i])
+        if phrase then bits[#bits + 1] = phrase end
+    end
+    if #bits == 0 then return nil end
+    local line
+    if place then
+        line = "In " .. place .. ", Forever Guide lists " .. table.concat(bits, ", ") .. "."
+    else
+        line = "Forever Guide lists " .. table.concat(bits, ", ") .. "."
+    end
+    local more = row[5]
+    if type(more) == "number" and more > 0 then
+        line = line .. " It lists " .. more .. " more mobs there."
+    end
+    local zones = row[6]
+    if type(zones) == "number" and zones > 0 then
+        line = line .. " It lists " .. zones .. " more zones."
+    end
+    return line
+end
+
+local function ShortMob(shown)
+    local mob = shown[1]
+    if type(mob) ~= "table" then return nil end
+    local name = mob[1]
+    if type(name) ~= "string" or name == "" then return nil end
+    if type(mob[2]) == "number" then return name .. " " .. TrimPercent(mob[2]) .. "%" end
+    return name
+end
+
+-- Forever Guide does not export its item search. Data/RecipeDrops.lua is that lookup:
+-- mob, classic percent, and zone or instance for recipe items. A blank percent was blank there.
+local function GuideSpots(itemID)
+    local book = SG.RecipeDrops
+    local rows = book and book[itemID]
+    if type(rows) ~= "table" then return nil end
+    local side = Side()
+    local spots = {}
+    local rest = rows.rest
+    for i = 1, #rows do
+        local row = rows[i]
+        if type(row) == "table" then
+            local shown = ShownMobs(row[7], side)
+            local place = ZoneTitle(row)
+            local text = GuideLine(row, shown, place)
+            if text then
+                local pin = type(row[2]) == "number" and type(row[3]) == "number" and type(row[4]) == "number"
+                    and row[3] >= 0 and row[3] <= 100 and row[4] >= 0 and row[4] <= 100
+                spots[#spots + 1] = {
+                    text = text,
+                    place = place,
+                    tag = "World Drops",
+                    order = 3,
+                    line = ShortMob(shown),
+                    map = pin and row[2] or nil,
+                    x = pin and row[3] or nil,
+                    y = pin and row[4] or nil,
+                }
+            end
+        end
+    end
+    if #spots == 0 then return nil end
+    if type(rest) == "table" and type(rest[1]) == "number" and type(rest[2]) == "number" and rest[2] > 0 then
+        spots[#spots].text = spots[#spots].text .. " The classic list also names " .. rest[2] .. " more mobs at " .. TrimPercent(rest[1]) .. "%."
+    end
+    return spots
+end
+
+local function AreaTitle(area)
+    if type(area) ~= "number" or not C_Map or not C_Map.GetAreaInfo then return nil end
+    local name = C_Map.GetAreaInfo(area)
+    if type(name) == "string" and name ~= "" then return name end
+    return nil
+end
+
+local function NpcHidden(id, side)
+    local db = _G.NpcDB
+    if not db or not db.friendlyToFaction then return false end
+    local ok, fac = pcall(db.friendlyToFaction, id)
+    if not ok or type(fac) ~= "string" or fac == "" then return false end
+    return string.find(fac, side, 1, true) ~= nil
+end
+
+-- QuestieDB wowhead rows are quest-objective items. Use one only when Forever Guide has no recipe row.
+local function DropListSpots(itemID)
+    if not SG.Gear or not SG.Gear.DropTable then return nil end
+    local book = SG.Gear.DropTable()
+    local row = type(book) == "table" and book[itemID] or nil
+    if type(row) ~= "table" then return nil end
+    local ranked = {}
+    for npc, pct in pairs(row) do
+        if type(npc) == "number" and type(pct) == "number" and pct > 0 then
+            ranked[#ranked + 1] = { npc, pct }
+        end
+    end
+    if #ranked == 0 then return nil end
+    table.sort(ranked, function(a, b)
+        if a[2] ~= b[2] then return a[2] > b[2] end
+        return a[1] < b[1]
+    end)
+    local db = _G.NpcDB
+    local side = Side()
+    local groups, order = {}, {}
+    local limit = #ranked > 6 and 6 or #ranked
+    for i = 1, limit do
+        local npc = ranked[i][1]
+        if not NpcHidden(npc, side) and db and db.name then
+            local ok, got = pcall(db.name, npc)
+            local place = ""
+            if ok and type(got) == "string" and got ~= "" then
+                if db.zoneID then
+                    local known, area = pcall(db.zoneID, npc)
+                    if known then place = AreaTitle(area) or "" end
+                end
+                local bucket = groups[place]
+                if not bucket then
+                    bucket = {}
+                    groups[place] = bucket
+                    order[#order + 1] = place
+                end
+                bucket[#bucket + 1] = { got, ranked[i][2] }
+            end
+        end
+    end
+    if #order == 0 then return nil end
+    local spots = {}
+    local extra = #ranked - limit
+    for i = 1, #order do
+        local place = order[i]
+        local bucket = groups[place]
+        local bits = {}
+        for m = 1, #bucket do
+            bits[#bits + 1] = bucket[m][1] .. " (" .. TrimPercent(bucket[m][2]) .. "%)"
+        end
+        local where = place ~= "" and place or nil
+        local text = "The drop list names " .. table.concat(bits, ", ")
+        if where then text = text .. " in " .. where end
+        text = text .. "."
+        if i == #order and extra > 0 then
+            text = text .. " It names " .. extra .. " more mobs."
+        end
+        spots[#spots + 1] = {
+            text = text,
+            place = where,
+            tag = "World Drops",
+            order = 3,
+            line = bucket[1][1] .. " " .. TrimPercent(bucket[1][2]) .. "%",
+        }
+    end
+    return spots
+end
+
+-- ItemDB.npcDrops names mobs and has no percent. Use it only for a short list.
+local function QuestieSpots(itemID)
+    local db = _G.ItemDB
+    if not db or not db.npcDrops then return nil end
+    local ok, list = pcall(db.npcDrops, itemID)
+    if not ok or type(list) ~= "table" then return nil end
+    local side = Side()
+    local npcs = _G.NpcDB
+    local ids = {}
+    local count = 0
+    for _, id in pairs(list) do
+        if type(id) == "number" and not NpcHidden(id, side) then
+            count = count + 1
+            if count <= 8 then ids[#ids + 1] = id end
+        end
+    end
+    if count == 0 then return nil end
+    if count > 8 then
+        return {
+            {
+                text = "Questie names " .. count .. " mobs and has no percent.",
+                tag = "World Drops",
+                order = 3,
+            },
+        }
+    end
+    table.sort(ids)
+    local groups, order = {}, {}
+    for i = 1, #ids do
+        local name
+        if npcs and npcs.name then
+            local known, got = pcall(npcs.name, ids[i])
+            if known and type(got) == "string" and got ~= "" then name = got end
+        end
+        if name then
+            local place = ""
+            if npcs.zoneID then
+                local known, area = pcall(npcs.zoneID, ids[i])
+                if known then place = AreaTitle(area) or "" end
+            end
+            local bucket = groups[place]
+            if not bucket then
+                bucket = {}
+                groups[place] = bucket
+                order[#order + 1] = place
+            end
+            bucket[#bucket + 1] = name
+        end
+    end
+    if #order == 0 then return nil end
+    local spots = {}
+    for i = 1, #order do
+        local place = order[i]
+        local where = place ~= "" and place or nil
+        local text = "Questie names " .. table.concat(groups[place], ", ") .. "."
+        if where then text = text .. " It places that in " .. where .. "." end
+        text = text .. " It has no percent."
+        spots[#spots + 1] = {
+            text = text,
+            place = where,
+            tag = "World Drops",
+            order = 3,
+            line = groups[place][1],
+        }
+    end
+    return spots
+end
+
+local function AppendTail(spots, recipe)
+    local tail = DropTail(recipe)
+    if tail ~= "" and spots[1] then
+        spots[#spots].text = spots[#spots].text .. tail
+    end
+end
+
+local function HasNamedMob(recipe)
+    local bosses = recipe.bosses
+    if type(bosses) == "table" and type(bosses[1]) == "table" and type(bosses[1][1]) == "string" and bosses[1][1] ~= "" then
+        return true
+    end
+    local drops = recipe.drops
+    if type(drops) ~= "table" then return false end
+    for i = 1, #drops do
+        local row = drops[i]
+        if type(row) == "table" and type(row[1]) == "string" and row[1] ~= "" then return true end
+    end
+    return false
+end
+
+local function DropText(recipe)
+    local tail = DropTail(recipe)
     local bosses = recipe.bosses
     if type(bosses) == "table" and type(bosses[1]) == "table" then
         local boss = bosses[1]
@@ -322,9 +616,29 @@ local function DropPlace(recipe)
 end
 
 local function DropSpot(recipe)
+    local itemID = recipe.recipe
+    if type(itemID) == "number" then
+        local guided = GuideSpots(itemID)
+        if guided then
+            AppendTail(guided, recipe)
+            return guided
+        end
+        local listed = DropListSpots(itemID)
+        if listed then
+            AppendTail(listed, recipe)
+            return listed
+        end
+    end
     local text, named = DropText(recipe)
     local place = DropPlace(recipe) or named
     if type(place) ~= "string" or place == "" then place = nil end
+    if type(itemID) == "number" and not HasNamedMob(recipe) then
+        local questie = QuestieSpots(itemID)
+        if questie then
+            AppendTail(questie, recipe)
+            return questie
+        end
+    end
     return {
         {
             text = text,
@@ -371,7 +685,11 @@ local function MakeStep(recipe, spot, profName)
         x = spot.x,
         y = spot.y,
     }
-    if skill > 0 then step.dropLine = "Skill " .. skill end
+    if type(spot.line) == "string" and spot.line ~= "" then
+        step.dropLine = spot.line
+    elseif skill > 0 then
+        step.dropLine = "Skill " .. skill
+    end
     if type(recipeId) == "number" and recipeId > 0 then
         step.rewards = { recipeId }
         step.itemID = recipeId
@@ -445,7 +763,7 @@ function SG.Recipes.Build()
         category = "professions",
         side = "B",
         place = "Professions",
-        blurb = "Recipes a vendor sells, a quest rewards, or that drop in the world, for a profession this character has. Grouped by profession, then vendors, quests, or world drops, then the zone or dungeon the list names. Trainer recipes stay at the trainer. A learned recipe leaves the list. This does not level the profession for you.",
+        blurb = "Recipes a vendor sells, a quest rewards, or that drop in the world, for a profession this character has. Grouped by profession, then vendors, quests, or world drops, then the zone or instance. A world drop names the mob and the percent when Forever Guide's item search has them. That percent is the classic chance Forever Guide ships, not a Forever Wowhead rate. A sighting with no percent says so. Trainer recipes stay at the trainer. A learned recipe leaves the list. This does not level the profession for you.",
         min = 1,
         max = 60,
         steps = {},
