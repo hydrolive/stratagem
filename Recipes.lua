@@ -92,8 +92,11 @@ end
 local function DataKey()
     local ns = Namespace()
     local loaded = (ns and type(ns.RecipeData) == "table") and "1" or "0"
+    local journal = ns and ns.Journal
+    local jbit = (journal and journal.Factions) and "J1" or "J0"
+    local qbit = (_G.ItemDB and _G.ItemDB.teachesSpell) and "Q1" or "Q0"
     local ids = ProfessionIds()
-    local bits = { loaded }
+    local bits = { loaded, jbit, qbit }
     for i = 1, #ids do bits[#bits + 1] = tostring(ids[i]) end
     return table.concat(bits, ",")
 end
@@ -761,6 +764,244 @@ local function DropSpot(recipe)
     }
 end
 
+local function Journal()
+    local ns = Namespace()
+    return ns and ns.Journal
+end
+
+local function SkillSet()
+    local set = {}
+    local ids = ProfessionIds()
+    for i = 1, #ids do set[ids[i]] = true end
+    return set
+end
+
+local function NameRank()
+    local rank, slot, seen = {}, 0, {}
+    if not GetProfessions or not GetProfessionInfo then return rank end
+    local function add(index)
+        if not index then return end
+        local name, _, _, _, _, _, skillLine = GetProfessionInfo(index)
+        if type(skillLine) ~= "number" or skillLine <= 0 or seen[skillLine] then return end
+        seen[skillLine] = true
+        slot = slot + 1
+        if type(name) == "string" and name ~= "" then rank[name] = slot end
+    end
+    local first, second, arch, fish, cook = GetProfessions()
+    add(first)
+    add(second)
+    add(arch)
+    add(fish)
+    add(cook)
+    return rank
+end
+
+local function FactionCode(faction)
+    if type(faction) ~= "table" then return "B" end
+    if faction.side == "Alliance" then return "A" end
+    if faction.side == "Horde" then return "H" end
+    return "B"
+end
+
+local function StandingLabel(reaction)
+    if type(reaction) ~= "number" then return nil end
+    local journal = Journal()
+    local rep = journal and journal.Reputation
+    if rep and rep.Label then
+        local ok, label = pcall(rep.Label, reaction)
+        if ok and type(label) == "string" and label ~= "" then return label end
+    end
+    if GetText then
+        local sex = UnitSex and UnitSex("player") or nil
+        local ok, label = pcall(GetText, "FACTION_STANDING_LABEL" .. reaction, sex)
+        if ok and type(label) == "string" and label ~= "" then return label end
+    end
+    return nil
+end
+
+local function RecipeSubtype(itemID)
+    local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if type(instant) ~= "function" then return nil end
+    local ok, _, _, sub = pcall(instant, itemID)
+    if not ok or type(sub) ~= "string" or sub == "" then return nil end
+    return sub
+end
+
+local function TaughtSpell(itemID)
+    local db = _G.ItemDB
+    if not db or not db.teachesSpell then return nil end
+    local ok, spell = pcall(db.teachesSpell, itemID)
+    if ok and type(spell) == "number" and spell > 0 then return spell end
+    return nil
+end
+
+local function RepPrice(faction, itemID)
+    local prices = faction.prices
+    if type(prices) ~= "table" then return nil end
+    local copper = prices[itemID]
+    if type(copper) ~= "number" or copper <= 0 then return nil end
+    return copper
+end
+
+local function Quartermaster(faction)
+    local spot = faction.quartermaster
+    local who, map, x, y
+    if type(spot) ~= "table" then return nil end
+    if type(spot.name) == "string" and spot.name ~= "" then who = spot.name end
+    if type(spot.map) == "number" and type(spot.x) == "number" and type(spot.y) == "number"
+        and spot.x >= 0 and spot.x <= 100 and spot.y >= 0 and spot.y <= 100 then
+        map, x, y = spot.map, spot.x, spot.y
+    end
+    local zone = ZoneName(map)
+    if not zone and type(faction.zone) == "string" and faction.zone ~= "" then zone = faction.zone end
+    return who, zone, map, x, y
+end
+
+-- Journal tiers are the reputation rewards. The profession name is the client recipe subtype.
+-- A subtype that is not one of this character's professions stays off.
+local function ReputationRows(side, skills, ranks)
+    local rows, items = {}, {}
+    local journal = Journal()
+    local loot = journal and journal.Loot
+    if not journal or not journal.Factions or not loot or not loot.Recipe or not loot.RecipeYours then
+        return rows, items
+    end
+    local ok, list = pcall(journal.Factions, "reputation")
+    if not ok or type(list) ~= "table" then return rows, items end
+    for i = 1, #list do
+        local faction = list[i]
+        local code = FactionCode(faction)
+        local name = type(faction) == "table" and faction.name or nil
+        if type(faction) == "table" and not faction.unreleased and type(name) == "string" and name ~= ""
+            and (code == "B" or code == side) and type(faction.tiers) == "table" then
+            local who, zone, map, x, y = Quartermaster(faction)
+            local seen = {}
+            for t = 1, #faction.tiers do
+                local tier = faction.tiers[t]
+                local bag = tier and tier.items
+                local standing = tier and tier.standing
+                if type(bag) == "table" and type(standing) == "number" then
+                    for n = 1, #bag do
+                        local itemID = bag[n]
+                        if type(itemID) == "number" and itemID > 0 and not seen[itemID] then
+                            local known, subclass = pcall(loot.Recipe, itemID)
+                            local yours = false
+                            if known and type(subclass) == "number" then
+                                local mine, got = pcall(loot.RecipeYours, subclass, { skills = skills })
+                                yours = mine and got and true or false
+                            end
+                            local prof = yours and RecipeSubtype(itemID) or nil
+                            if prof and ranks[prof] then
+                                seen[itemID] = true
+                                items[itemID] = true
+                                rows[#rows + 1] = {
+                                    itemID = itemID,
+                                    standing = standing,
+                                    faction = name,
+                                    vendor = who,
+                                    zone = zone,
+                                    map = map,
+                                    x = x,
+                                    y = y,
+                                    price = RepPrice(faction, itemID),
+                                    prof = prof,
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return rows, items
+end
+
+local function RepSentence(row)
+    local title = ItemLabel(row.itemID) or "the recipe"
+    local standing = StandingLabel(row.standing) or ("standing " .. row.standing)
+    local bits = {}
+    local where = row.zone
+    local at = PointText(row.x, row.y)
+    if row.vendor and where and at then
+        bits[#bits + 1] = "Buy " .. title .. " from " .. row.vendor .. " in " .. where .. ", near " .. at .. "."
+    elseif row.vendor and where then
+        bits[#bits + 1] = "Buy " .. title .. " from " .. row.vendor .. " in " .. where .. "."
+    elseif row.vendor and at then
+        bits[#bits + 1] = "Buy " .. title .. " from " .. row.vendor .. " near " .. at .. "."
+    elseif row.vendor then
+        bits[#bits + 1] = "Buy " .. title .. " from " .. row.vendor .. ". The journal does not name the zone."
+    elseif where then
+        bits[#bits + 1] = "The journal lists " .. title .. " in " .. where .. " and does not name the vendor."
+    else
+        bits[#bits + 1] = "The journal lists " .. title .. " and does not name the vendor or the zone."
+    end
+    bits[#bits + 1] = standing .. " with " .. row.faction .. " is required."
+    local price = PriceText(row.price)
+    if price then bits[#bits + 1] = "The journal prices it at " .. price .. "." end
+    return table.concat(bits, " ")
+end
+
+local function RecipeBook(data, profs)
+    local book = {}
+    if type(data) ~= "table" then return book end
+    for p = 1, #profs do
+        local prof = data[profs[p]]
+        if type(prof) == "table" and type(prof.recipes) == "table" then
+            for i = 1, #prof.recipes do
+                local recipe = prof.recipes[i]
+                local item = type(recipe) == "table" and recipe.recipe or nil
+                if type(item) == "number" and not book[item] then book[item] = recipe end
+            end
+        end
+    end
+    return book
+end
+
+local function AddReputation(found, n, rows, book, ranks)
+    for i = 1, #rows do
+        local row = rows[i]
+        local known = book[row.itemID]
+        local spell = TaughtSpell(row.itemID)
+        if not spell and type(known) == "table" and type(known.spell) == "number" then spell = known.spell end
+        local skill = 0
+        if type(known) == "table" and type(known.skill) == "number" and known.skill > 0 then skill = known.skill end
+        local text = RepSentence(row)
+        if skill > 0 then text = text .. " It asks for skill " .. skill .. "." end
+        local standing = StandingLabel(row.standing) or ("standing " .. row.standing)
+        local line = standing
+        if row.vendor then line = standing .. " · " .. row.vendor end
+        n = n + 1
+        found[#found + 1] = {
+            rank = ranks[row.prof] or 50,
+            order = 4,
+            place = row.faction,
+            skill = row.standing,
+            spell = spell or row.itemID,
+            index = n,
+            step = {
+                kind = "recipe",
+                spell = spell,
+                optional = false,
+                match = "bis",
+                visible = true,
+                segment = row.prof .. " - " .. row.faction .. " - Vendor",
+                zone = row.prof,
+                level = skill > 0 and skill or 1,
+                title = ItemLabel(row.itemID) or SpellLabel(spell) or "Recipe",
+                text = text,
+                baseText = text,
+                map = row.map,
+                x = row.x,
+                y = row.y,
+                itemID = row.itemID,
+                rewards = { row.itemID },
+                dropLine = line,
+            },
+        }
+    end
+    return n
+end
+
 local function SpotsFor(recipe, side)
     if type(recipe) ~= "table" then return nil end
     if recipe.source == "vendor" then return VendorSpots(recipe, side) end
@@ -824,6 +1065,9 @@ local function Fill(steps, note, guide, data, profs, side)
     for i = 1, #profs do rank[profs[i]] = i end
     local found = {}
     local n = 0
+    local ranks = NameRank()
+    local repRows, repItems = ReputationRows(side, SkillSet(), ranks)
+    local book = RecipeBook(data, profs)
     for p = 1, #profs do
         local profId = profs[p]
         local prof = data[profId]
@@ -832,7 +1076,10 @@ local function Fill(steps, note, guide, data, profs, side)
             local here = rank[profId] or 99
             for i = 1, #prof.recipes do
                 local recipe = prof.recipes[i]
-                local spots = SpotsFor(recipe, side)
+                local itemID = type(recipe) == "table" and recipe.recipe or nil
+                local skipVendor = type(recipe) == "table" and recipe.source == "vendor"
+                    and type(itemID) == "number" and repItems[itemID]
+                local spots = (not skipVendor) and SpotsFor(recipe, side) or nil
                 if spots and type(recipe.spell) == "number" then
                     local skill = type(recipe.skill) == "number" and recipe.skill or 0
                     for s = 1, #spots do
@@ -852,6 +1099,7 @@ local function Fill(steps, note, guide, data, profs, side)
             end
         end
     end
+    n = AddReputation(found, n, repRows, book, ranks)
     table.sort(found, FinderBefore)
     local count = 0
     for i = 1, #found do
@@ -860,7 +1108,7 @@ local function Fill(steps, note, guide, data, profs, side)
     end
     if count == 0 then
         note.visible = true
-        note.text = "None of your professions have a vendor, quest, or world-drop recipe on the loaded list."
+        note.text = "None of your professions have a vendor, quest, world-drop, or reputation recipe on the loaded list."
         note.baseText = note.text
     end
     guide.questCount = count
@@ -876,7 +1124,7 @@ function SG.Recipes.Build()
         category = "professions",
         side = "B",
         place = "Professions",
-        blurb = "Recipes a vendor sells, a quest rewards, or that drop in the world, for a profession this character has. Grouped by profession, then vendors, quests, or world drops, then the zone or instance. A world drop names the mob, where that mob stands when Forever Guide stored a point, and the percent when its item search has them. That percent is the classic chance Forever Guide ships, not a Forever Wowhead rate. A sighting with no percent says so. A dungeon names its entrance when that point is stored. A bind-on-equip drop adds Auctionator's last scanned auction price when that addon has one. Trainer recipes stay at the trainer. A learned recipe is marked done and leaves the list. This does not level the profession for you.",
+        blurb = "Recipes a vendor sells, a quest rewards, that drop in the world, or that a reputation quartermaster sells, for a profession this character has. Grouped by profession, then vendors, quests, or world drops, then the zone or instance. A reputation recipe is grouped as the profession, the faction, and Vendor. It names the quartermaster, the zone, the map point, and the standing when the journal has them. A world drop names the mob, where that mob stands when Forever Guide stored a point, and the percent when its item search has them. That percent is the classic chance Forever Guide ships, not a Forever Wowhead rate. A sighting with no percent says so. A dungeon names its entrance when that point is stored. A bind-on-equip drop adds Auctionator's last scanned auction price when that addon has one. Trainer recipes stay at the trainer. A learned recipe is marked done and leaves the list. This does not level the profession for you.",
         min = 1,
         max = 60,
         steps = {},
@@ -899,8 +1147,8 @@ function SG.Recipes.Build()
         zone = "Recipes",
         level = 1,
         title = "No recipes to find",
-        text = "No vendor, quest, or world-drop recipe is left for a profession you have.",
-        baseText = "No vendor, quest, or world-drop recipe is left for a profession you have.",
+        text = "No vendor, quest, world-drop, or reputation recipe is left for a profession you have.",
+        baseText = "No vendor, quest, world-drop, or reputation recipe is left for a profession you have.",
     }
     local steps = { note }
     local ns = Namespace()

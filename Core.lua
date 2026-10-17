@@ -576,6 +576,7 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         end
         if SG.classToken and SG.Gear and SG.Gear.Start then SG.Gear.Start() end
         if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
+        if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
     elseif event == "ADDON_LOADED" and SG.classToken and (
         arg1 == "NaowhForever" or arg1 == "NaowhForever_BiS" or arg1 == "NaowhForever_DungeonJournal"
         or arg1 == "NaowhForever_Professions" or arg1 == "NaowhForever_QoL"
