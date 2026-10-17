@@ -284,6 +284,9 @@ function SG.UI.Create()
             if self.id == "reputation" and SG.Reputation and SG.Reputation.Refresh then
                 SG.Reputation.Refresh()
             end
+            if self.id == "routes" and SG.Polestar and SG.Polestar.Refresh then
+                SG.Polestar.Refresh()
+            end
             SG.UI.Refresh(true)
         end)
         button:SetScript("OnEnter", function(self)
@@ -1232,7 +1235,7 @@ function SG.UI.RefreshSteps(resetScroll)
             if chained then row.chain:Show() else row.chain:Hide() end
             row.title:SetText(prefix .. step.title)
             local bits = {}
-            if step.level and (step.questID or step.kind == "farm" or step.kind == "gear" or step.kind == "run") then
+            if step.level and (step.questID or step.kind == "farm" or step.kind == "gear" or step.kind == "run" or step.kind == "path") then
                 bits[#bits + 1] = "Lv " .. step.level
             end
             if step.optional then bits[#bits + 1] = "(Optional)" end

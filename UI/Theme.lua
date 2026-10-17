@@ -27,6 +27,7 @@ SG.Theme = {
 
 SG.CATEGORIES = {
     { id = "leveling",     name = "Gear",         icon = "cat_leveling.tga" },
+    { id = "routes",       name = "Leveling",     icon = "cat_leveling.tga" },
     { id = "professions",  name = "Professions",  icon = "cat_professions.tga" },
     { id = "reputation",   name = "Reputation",   icon = "cat_reputation.tga" },
     { id = "exploration",  name = "Exploration",  icon = "cat_exploration.tga" },

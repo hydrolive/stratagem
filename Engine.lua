@@ -838,6 +838,7 @@ function SG.Engine.Rebuild()
     if SG.Recipes and SG.Recipes.Install then SG.Recipes.Install(true) end
     if SG.ProfPath and SG.ProfPath.Install then SG.ProfPath.Install(true) end
     if SG.Reputation and SG.Reputation.Install then SG.Reputation.Install(true) end
+    if SG.Polestar and SG.Polestar.Install then SG.Polestar.Install(true) end
 end
 
 function SG.Engine.Get(id)
@@ -1149,6 +1150,10 @@ function SG.Engine.CatchUp(guide, fromSelection)
         SG.Reputation.Prepare(guide.id)
         guide = SG.Engine.Get(guide.id) or guide
     end
+    if guide.psRoute and SG.Polestar and SG.Polestar.Prepare then
+        SG.Polestar.Prepare(guide.id)
+        guide = SG.Engine.Get(guide.id) or guide
+    end
     local row = SG.Engine.Progress(guide.id)
     local before = row.cursor
     if fromSelection then row.hold = nil end
@@ -1182,6 +1187,11 @@ function SG.Engine.OnQuestUpdate()
         if SG.ProfPath and SG.ProfPath.Apply and SG.Engine.guides then
             for i = 1, #SG.Engine.guides do
                 if SG.Engine.guides[i].profPath then SG.ProfPath.Apply(SG.Engine.guides[i]) end
+            end
+        end
+        if SG.Polestar and SG.Polestar.Apply and SG.Engine.guides then
+            for i = 1, #SG.Engine.guides do
+                if SG.Engine.guides[i].psRoute then SG.Polestar.Apply(SG.Engine.guides[i]) end
             end
         end
         if SG.db.options.autoAdvance then

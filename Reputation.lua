@@ -154,6 +154,9 @@ local function DataKey()
     local ids = SkillLines()
     local bits = { loaded }
     for i = 1, #ids do bits[#bits + 1] = tostring(ids[i]) end
+    local token = "0"
+    if SG.Polestar and SG.Polestar.Token then token = SG.Polestar.Token() end
+    bits[#bits + 1] = "P" .. token
     return table.concat(bits, ",")
 end
 
@@ -770,6 +773,21 @@ local function BuildRecipes(side, key)
     return guide
 end
 
+local function SpeedBlurb(name)
+    return "Speed steps for " .. name .. " from the loaded guide. The open step shows the standing bar the client reports, from 0 to the width of the standing you are on. Earlier steps are marked done once your standing passes them. Dungeon runs and turn-ins stay when that guide names them."
+end
+
+local function UseSpeed(guide, steps, lo, hi, name)
+    guide.repSpeed = true
+    guide.blurb = SpeedBlurb(name)
+    Stamp(guide, steps)
+    guide.questCount = #steps
+    guide.visibleQuests = #steps
+    if type(lo) == "number" then guide.min = lo end
+    if type(hi) == "number" then guide.max = hi end
+    if not guide.max or guide.max < 1 then guide.max = 60 end
+end
+
 local function BuildFaction(faction, key)
     local side = SideCode(faction)
     local questSide = side
@@ -786,6 +804,13 @@ local function BuildFaction(faction, key)
     guide.repKind = "faction"
     guide.repKey = key
     guide.repFaction = faction.id
+    if SG.Polestar and SG.Polestar.FactionSteps and type(faction.id) == "number" then
+        local speed, lo, hi = SG.Polestar.FactionSteps(faction.id)
+        if type(speed) == "table" and #speed > 0 then
+            UseSpeed(guide, speed, lo, hi, faction.name)
+            return guide
+        end
+    end
     local steps = {}
     local who, map, x, y = Pin(faction.quartermaster)
     if who and type(map) == "number" then
@@ -840,10 +865,31 @@ local function Collect()
     local side = PlayerSide()
     local key = DataKey()
     local guides = { BuildGear(side, key), BuildRecipes(side, key) }
+    local seen = {}
     local factions = SortedFactions(nil)
     if factions then
         for i = 1, #factions do
-            guides[#guides + 1] = BuildFaction(factions[i], key)
+            local faction = factions[i]
+            if type(faction.id) == "number" then seen[faction.id] = true end
+            guides[#guides + 1] = BuildFaction(faction, key)
+        end
+    end
+    if SG.Polestar and SG.Polestar.ExtraReps then
+        local extras = SG.Polestar.ExtraReps(seen)
+        for i = 1, #extras do
+            local extra = extras[i]
+            local guide = BlankGuide(
+                "rep-ps-" .. extra.faction,
+                extra.name,
+                extra.side or "B",
+                SpeedBlurb(extra.name),
+                extra.name
+            )
+            guide.repKind = "faction"
+            guide.repKey = key
+            guide.repFaction = extra.faction
+            UseSpeed(guide, extra.steps, extra.min, extra.max, extra.name)
+            guides[#guides + 1] = guide
         end
     end
     return guides
@@ -944,6 +990,39 @@ local function ApplyRecipes(guide)
     return false
 end
 
+local function ApplySpeed(guide)
+    local reaction = ReactionOf(guide.repFaction)
+    local row = Progress(guide)
+    local steps = guide.steps or {}
+    local cut = 0
+    local exalted = type(reaction) == "number" and reaction >= ExaltedCut()
+    for i = 1, #steps do
+        local standing = steps[i].repStanding
+        if standing and type(reaction) == "number" and reaction >= standing then cut = i end
+    end
+    if exalted then cut = #steps end
+    local name, have, width
+    if SG.Polestar and SG.Polestar.Bar then
+        name, have, width = SG.Polestar.Bar(guide.repFaction)
+    end
+    local shown = false
+    for i = 1, #steps do
+        local step = steps[i]
+        step.visible = true
+        if i <= cut and row and row.hold ~= i then row.done[i] = true end
+        local text = step.baseText or step.text or ""
+        if i > cut and not shown and name and width then
+            text = text .. "\nYou are " .. name .. " " .. have .. "/" .. width .. "."
+            step.dropLine = name .. " " .. have .. "/" .. width
+            shown = true
+        else
+            step.dropLine = nil
+        end
+        step.text = text
+    end
+    return false
+end
+
 local function ApplyFaction(guide)
     local reaction = ReactionOf(guide.repFaction)
     local exalted = type(reaction) == "number" and reaction >= ExaltedCut()
@@ -973,6 +1052,7 @@ function SG.Reputation.Apply(guide, allowAsk)
     if not guide or not guide.reputation then return false end
     if guide.repKind == "gear" then return ApplyGear(guide, allowAsk) end
     if guide.repKind == "recipes" then return ApplyRecipes(guide) end
+    if guide.repSpeed then return ApplySpeed(guide) end
     return ApplyFaction(guide)
 end
 

@@ -570,6 +570,7 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         arg1 == "NaowhForever" or arg1 == "NaowhForever_BiS" or arg1 == "NaowhForever_DungeonJournal"
         or arg1 == "NaowhForever_Professions" or arg1 == "NaowhForever_QoL"
         or arg1 == "NaowwahForever" or arg1 == "NaowwahForever_BiS" or arg1 == "NaowwahForever_Professions"
+        or arg1 == "Polestar" or arg1 == "Polestar_Guides"
     ) then
         if SG.BiS and SG.BiS.Refresh then SG.BiS.Refresh() end
         if SG.Engine and SG.Engine.Rebuild then

@@ -165,6 +165,9 @@ local function DataKey()
     }
     local rows = ProfessionRows()
     for i = 1, #rows do bits[#bits + 1] = tostring(rows[i].id) end
+    local token = "0"
+    if SG.Polestar and SG.Polestar.Token then token = SG.Polestar.Token() end
+    bits[#bits + 1] = "P" .. token
     return table.concat(bits, ",")
 end
 
@@ -780,7 +783,27 @@ local function Blank(row)
     }
 end
 
+local function FromPolestar(row)
+    if not SG.Polestar or not SG.Polestar.ProfessionSteps then return nil end
+    local steps = SG.Polestar.ProfessionSteps(row.id)
+    if type(steps) ~= "table" or #steps == 0 then return nil end
+    local guide = Blank(row)
+    guide.profLinear = true
+    guide.blurb = "Order for " .. row.name .. " from the loaded guide. Each step names the zone, craft, or trainer. Earlier steps are marked done when your skill moves on. A craft names the recipe and reagents that guide lists."
+    guide.max = 60
+    for i = 1, #steps do
+        steps[i].index = i
+        steps[i].guide = guide.id
+    end
+    guide.steps = steps
+    guide.questCount = #steps
+    guide.visibleQuests = #steps
+    return guide
+end
+
 local function BuildOne(row, fishLine)
+    local guided = FromPolestar(row)
+    if guided then return guided end
     local steps = {}
     local cat = GatherCat(row.id)
     local ns = Namespace()
@@ -855,6 +878,18 @@ end
 
 function SG.ProfPath.Current(guide)
     if not guide or not guide.profPath or not guide.steps then return nil end
+    if guide.profLinear then
+        local skill = guide.profSkill or 0
+        local fallback
+        for i = 1, #guide.steps do
+            local step = guide.steps[i]
+            if step.visible and not step.profNote and not SG.Engine.IsDone(guide, i) then
+                if not fallback then fallback = i end
+                if (step.skillFrom or 0) <= skill then return i end
+            end
+        end
+        return fallback
+    end
     local skill = guide.profSkill or 0
     local rankAt, workAt, workFrom, craftAt, craftFrom
     for i = 1, #guide.steps do
