@@ -318,7 +318,7 @@ function SG.Widgets.Search(parent, onChange)
     if edit.SetTextInsets then edit:SetTextInsets(2, 2, 0, 0) end
     local hint = Font(frame, 12)
     hint:SetPoint("LEFT", 12, 0)
-    hint:SetText("Search guides")
+    hint:SetText("Search")
     hint:SetTextColor(SG.RGB(T.dim))
     edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)

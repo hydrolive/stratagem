@@ -835,6 +835,7 @@ function SG.Engine.Rebuild()
         local list = SG.Route.Attunements()
         for i = 1, #list do add(list[i]) end
     end
+    if SG.Collectibles and SG.Collectibles.Install then SG.Collectibles.Install(true) end
     if SG.Recipes and SG.Recipes.Install then SG.Recipes.Install(true) end
     if SG.ProfPath and SG.ProfPath.Install then SG.ProfPath.Install(true) end
     if SG.Reputation and SG.Reputation.Install then SG.Reputation.Install(true) end

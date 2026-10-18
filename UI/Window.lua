@@ -1,4 +1,4 @@
--- Window.lua: the browser. Sidebar, guide list, tabs, and the detail card.
+-- Window.lua: the browser. Sidebar, guide list, search, and the detail card.
 local _, SG = ...
 if type(SG) ~= "table" then
     SG = _G.Stratagem or {}
@@ -20,12 +20,6 @@ local function ListWidth(scroll)
     return w
 end
 
-local function Short(text, limit)
-    text = text or ""
-    if #text <= limit then return text end
-    return text:sub(1, limit - 3) .. "..."
-end
-
 local function SavePosition(frame)
     local point, _, rel, x, y = frame:GetPoint()
     SG.db.ui.point = point
@@ -34,100 +28,29 @@ local function SavePosition(frame)
     SG.db.ui.y = y
 end
 
-function SG.UI.ToggleFavorite(id)
-    if SG.db.favorites[id] then
-        SG.db.favorites[id] = nil
-    else
-        SG.db.favorites[id] = true
-    end
-    SG.UI.Refresh(false)
-end
-
 function SG.UI.Select(id)
     SG.db.selected = id
     SG.state.tab = "home"
     SG.UI.Refresh(false)
 end
 
--- Replaces the guide tab you are looking at. From the home list this just opens one.
-function SG.UI.OpenInPlace(id)
-    if not SG.Engine.Get(id) then return end
-    local current = SG.state.tab
-    if not current or current == "home" or current == id then
-        SG.UI.OpenTab(id)
-        return
-    end
-    local tabs = SG.db.tabs
-    for i = #tabs, 1, -1 do
-        if tabs[i] == id then table.remove(tabs, i) end
-    end
-    local replaced = false
-    for i = 1, #tabs do
-        if tabs[i] == current then
-            tabs[i] = id
-            replaced = true
-        end
-    end
-    if not replaced then
-        while #tabs >= 4 do table.remove(tabs, 1) end
-        tabs[#tabs + 1] = id
-    end
-    SG.state.tab = id
-    SG.db.selected = id
-    SG.char.active = id
-    SG.RememberRecent(id)
-    local guide = SG.Engine.Get(id)
-    if guide then SG.Engine.CatchUp(guide, true) end
-    SG.state.stepIndex = guide and SG.Engine.ShownIndex(guide) or nil
-    SG.UI.Refresh(true)
-    if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
-end
-
-function SG.UI.OpenTab(id, refresh)
-    if not SG.Engine.Get(id) then return end
-    local tabs = SG.db.tabs
-    local found = false
-    for i = 1, #tabs do
-        if tabs[i] == id then found = true end
-    end
-    if not found then
-        while #tabs >= 4 do table.remove(tabs, 1) end
-        tabs[#tabs + 1] = id
-    end
-    SG.state.tab = id
-    SG.db.selected = id
-    SG.char.active = id
-    SG.RememberRecent(id)
-    local guide = SG.Engine.Get(id)
-    if guide then SG.Engine.CatchUp(guide, true) end
-    SG.state.stepIndex = guide and SG.Engine.ShownIndex(guide) or nil
-    if refresh ~= false then SG.UI.Refresh(true) end
-    if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
-end
-
-function SG.UI.CloseTab(id)
-    local tabs = SG.db.tabs
-    for i = #tabs, 1, -1 do
-        if tabs[i] == id then table.remove(tabs, i) end
-    end
-    if SG.state.tab == id then SG.state.tab = "home" end
-    SG.UI.Refresh(true)
-end
-
 function SG.UI.Continue(id)
     local guide = SG.Engine.Get(id)
     if not guide then return end
-    -- OpenTab catches the character up, then the waypoint follows that step.
-    SG.UI.OpenTab(id, false)
+    SG.state.tab = id
+    SG.db.selected = id
+    SG.char.active = id
+    if SG.RememberRecent then SG.RememberRecent(id) end
+    if SG.Engine.CatchUp then SG.Engine.CatchUp(guide, true) end
     local index = SG.Engine.ShownIndex(guide)
     SG.state.stepIndex = index
-    if index then
+    if index and SG.Engine.Focus then
         SG.Engine.Focus(guide, index, true)
     elseif SG.Nav then
         SG.Nav.Set(nil)
     end
     SG.UI.Refresh(true)
-    if SG.Tracker.Update then SG.Tracker.Update() end
+    if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
 end
 
 function SG.UI.Show()
@@ -142,6 +65,7 @@ function SG.UI.DirectId()
         return SG.Route.ActiveId()
     end
     if category == "bis" then return "bis-60" end
+    if category == "collectibles" then return "collect-all" end
     return nil
 end
 
@@ -395,12 +319,6 @@ function SG.UI.Create()
 
     local search = SG.Widgets.Search(sidebar, function(text)
         SG.state.query = text or ""
-        if SG.db.category == "options" then SG.db.category = "leveling" end
-        if SG.db.category ~= "leveling" and SG.db.category ~= "bis" then
-            if SG.db.category ~= "professions" or SG.state.tab ~= "prof-recipes" then
-                SG.state.tab = "home"
-            end
-        end
         SG.UI.Refresh(true)
     end)
     search:SetPoint("TOPLEFT", 12, -112)
@@ -433,14 +351,23 @@ function SG.UI.Create()
         button.id = info.id
         button:SetScript("OnClick", function(self)
             SG.db.category = self.id
-            if self.id == "leveling" or self.id == "bis" then
-                local id = self.id == "bis" and "bis-60" or (SG.Route and SG.Route.ActiveId and SG.Route.ActiveId())
+            if self.id == "leveling" or self.id == "bis" or self.id == "collectibles" then
+                local id
+                if self.id == "bis" then
+                    id = "bis-60"
+                elseif self.id == "collectibles" then
+                    id = "collect-all"
+                elseif SG.Route and SG.Route.ActiveId then
+                    id = SG.Route.ActiveId()
+                end
                 local guide = id and SG.Engine.Get(id)
                 if guide then
                     SG.state.tab = id
                     SG.db.selected = id
                     if self.id == "leveling" then
                         SG.Engine.Focus(guide, SG.Engine.ShownIndex(guide), true)
+                    else
+                        SG.state.stepIndex = nil
                     end
                 end
             elseif self.id == "professions" and SG.db.profTab == "recipes" then
@@ -523,24 +450,8 @@ function SG.UI.Create()
     home:SetPoint("BOTTOMRIGHT")
     SG.UI.home = home
 
-    local faction = SG.Widgets.Button(home, "Faction", "ghost")
-    faction:SetHeight(22)
-    faction:SetPoint("TOPRIGHT", -14, -8)
-    faction:SetWidth(150)
-    faction:SetScript("OnClick", function()
-        local order = { "auto", "H", "A", "both" }
-        local current = SG.db.options.faction or "auto"
-        local nextMode = "auto"
-        for i = 1, #order do
-            if order[i] == current then nextMode = order[i % #order + 1] end
-        end
-        SG.db.options.faction = nextMode
-        SG.UI.Refresh(true)
-    end)
-    SG.UI.factionButton = faction
-
     local homeScroll = SG.Widgets.Scroll(home)
-    homeScroll:SetPoint("TOPLEFT", 0, -36)
+    homeScroll:SetPoint("TOPLEFT", 0, -8)
     homeScroll:SetPoint("BOTTOMRIGHT")
     homeScroll.onSized = function()
         if not SG.UI.home:IsShown() or SG.UI.sizing then return end
@@ -555,7 +466,7 @@ function SG.UI.Create()
     SG.UI.homeScroll = homeScroll
 
     local empty = CreateFrame("Frame", nil, home)
-    empty:SetPoint("TOPLEFT", 24, -72)
+    empty:SetPoint("TOPLEFT", 24, -16)
     empty:SetPoint("RIGHT", -24, 0)
     empty:SetHeight(96)
     empty:SetFrameLevel(home:GetFrameLevel() + 20)
@@ -567,16 +478,9 @@ function SG.UI.Create()
     emptyText:SetWordWrap(true)
     emptyText:SetHeight(36)
     emptyText:SetText("No guides match these filters.")
-    local showBoth = SG.Widgets.Button(empty, "Show both factions", "primary")
-    showBoth:SetSize(180, 28)
-    showBoth:SetPoint("TOPLEFT", 0, -40)
-    showBoth:SetScript("OnClick", function()
-        SG.db.options.faction = "both"
-        SG.UI.Refresh(true)
-    end)
     local showSpecs = SG.Widgets.Button(empty, "Show every spec", "ghost")
     showSpecs:SetSize(160, 28)
-    showSpecs:SetPoint("LEFT", showBoth, "RIGHT", 8, 0)
+    showSpecs:SetPoint("TOPLEFT", 0, -40)
     showSpecs:SetScript("OnClick", function()
         SG.db.options.onlyMySpec = false
         SG.Engine.Rebuild()
@@ -670,19 +574,6 @@ function SG.UI.BuildDetail(detail)
     eyebrow:SetTextColor(SG.RGB(T.gold))
     detail.eyebrow = eyebrow
 
-    local star = CreateFrame("Button", nil, detail)
-    star:SetSize(22, 22)
-    star:SetPoint("TOPRIGHT", -12, -12)
-    local starTex = star:CreateTexture(nil, "ARTWORK")
-    starTex:SetAllPoints()
-    starTex:SetTexture(SG.MEDIA .. "cat_favorites.tga")
-    star.tex = starTex
-    star:SetScript("OnClick", function()
-        local id = SG.db.selected
-        if id then SG.UI.ToggleFavorite(id) end
-    end)
-    detail.star = star
-
     local title = SG.Widgets.Text(detail, 18)
     title:SetPoint("TOPLEFT", 16, -36)
     title:SetPoint("TOPRIGHT", -16, -36)
@@ -770,8 +661,9 @@ function SG.UI.BuildDetail(detail)
         return button
     end
     detail.primary = wide("Continue", "primary", -258)
-    detail.secondary = wide("Open in tab", "ghost", -298)
-    detail.tertiary = wide("Open in new tab", "ghost", -332)
+    detail.secondary = wide("Mark done", "ghost", -298)
+    detail.tertiary = wide("Next step", "ghost", -332)
+    detail.pin = wide("Pin", "ghost", -366)
 
     local reset = CreateFrame("Button", nil, detail)
     reset:SetHeight(18)
@@ -1045,11 +937,6 @@ local function GuideRow(parent)
     sub:SetJustifyH("LEFT")
     sub:SetTextColor(SG.RGB(T.muted))
     row.sub = sub
-    local star = row:CreateTexture(nil, "OVERLAY")
-    star:SetSize(14, 14)
-    star:SetPoint("RIGHT", open, "LEFT", -6, 8)
-    star:SetTexture(SG.MEDIA .. "cat_favorites.tga")
-    row.star = star
     local mini = SG.Widgets.Bar(row)
     mini:SetHeight(3)
     mini:SetPoint("BOTTOMLEFT", 12, 6)
@@ -1057,14 +944,11 @@ local function GuideRow(parent)
     row.mini = mini
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetScript("OnClick", function(self, button)
-        if button == "RightButton" then
-            SG.UI.ToggleFavorite(self.guideID)
-            return
-        end
+        if button ~= "LeftButton" then return end
         local now = GetTime()
         if self.last and (now - self.last) < 0.35 then
             self.last = nil
-            SG.UI.OpenTab(self.guideID)
+            SG.UI.Continue(self.guideID)
         else
             self.last = now
             SG.UI.Select(self.guideID)
@@ -1118,15 +1002,65 @@ local function StepRow(parent)
     bar:SetPoint("BOTTOMLEFT")
     SG.Paint(bar, T.accent)
     row.bar = bar
+    local function wheel(_, delta)
+        local turn = parent:GetScript("OnMouseWheel")
+        if turn then turn(parent, delta) end
+    end
+    local icon = CreateFrame("Button", nil, row)
+    icon:SetSize(32, 32)
+    icon:SetPoint("TOPLEFT", 8, -8)
+    icon:SetFrameLevel(row:GetFrameLevel() + 3)
+    local iconTex = icon:CreateTexture(nil, "ARTWORK")
+    iconTex:SetAllPoints()
+    icon.tex = iconTex
+    icon:SetScript("OnEnter", function(self)
+        if not self.itemID then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if GameTooltip.SetItemByID then
+            GameTooltip:SetItemByID(self.itemID)
+        else
+            GameTooltip:SetHyperlink("item:" .. self.itemID)
+        end
+        GameTooltip:Show()
+    end)
+    icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    icon:SetScript("OnClick", function(self)
+        local owner = self:GetParent()
+        local handler = owner:GetScript("OnClick")
+        if handler then handler(owner, "LeftButton") end
+    end)
+    icon:EnableMouseWheel(true)
+    icon:SetScript("OnMouseWheel", wheel)
+    icon:Hide()
+    row.icon = icon
     local title = SG.Widgets.Text(row, 12)
     title:SetPoint("TOPLEFT", 12, -6)
-    title:SetPoint("RIGHT", -8, 0)
     title:SetJustifyH("LEFT")
+    title:SetWordWrap(true)
     row.title = title
+    local pin = CreateFrame("Button", nil, row)
+    pin:SetSize(46, 16)
+    pin:SetFrameLevel(row:GetFrameLevel() + 4)
+    pin:SetPoint("TOPRIGHT", -6, -6)
+    local pinText = SG.Widgets.Text(pin, 10)
+    pinText:SetPoint("CENTER")
+    pinText:SetText("Pin")
+    pinText:SetTextColor(SG.RGB(T.gold))
+    pin.label = pinText
+    pin:SetScript("OnClick", function()
+        local guide = SG.Engine.Get(SG.state.tab)
+        if guide and SG.Pins and SG.Pins.Toggle then
+            SG.Pins.Toggle(guide, row.index)
+            SG.UI.Refresh(false)
+        end
+    end)
+    pin:EnableMouseWheel(true)
+    pin:SetScript("OnMouseWheel", wheel)
+    row.pin = pin
     local chain = CreateFrame("Button", nil, row)
     chain:SetSize(16, 16)
     chain:SetFrameLevel(row:GetFrameLevel() + 3)
-    chain:SetPoint("TOPRIGHT", -6, -6)
+    chain:SetPoint("TOPRIGHT", pin, "TOPLEFT", -4, 0)
     local chainTex = chain:CreateTexture(nil, "ARTWORK")
     chainTex:SetAllPoints()
     chainTex:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")
@@ -1138,12 +1072,14 @@ local function StepRow(parent)
     end)
     chain:SetScript("OnLeave", function() GameTooltip:Hide() end)
     chain:SetScript("OnClick", function() end)
+    chain:EnableMouseWheel(true)
+    chain:SetScript("OnMouseWheel", wheel)
     chain:Hide()
     row.chain = chain
     local sub = SG.Widgets.Text(row, 11)
     sub:SetPoint("TOPLEFT", 12, -24)
-    sub:SetPoint("RIGHT", -8, 0)
     sub:SetJustifyH("LEFT")
+    sub:SetWordWrap(true)
     sub:SetTextColor(SG.RGB(T.muted))
     row.sub = sub
     row:SetScript("OnClick", function(self)
@@ -1158,10 +1094,7 @@ local function StepRow(parent)
     end)
     row:SetScript("OnLeave", function(self) SG.UI.PaintStep(self) end)
     row:EnableMouseWheel(true)
-    row:SetScript("OnMouseWheel", function(_, delta)
-        local turn = parent:GetScript("OnMouseWheel")
-        if turn then turn(parent, delta) end
-    end)
+    row:SetScript("OnMouseWheel", wheel)
     return row
 end
 
@@ -1189,97 +1122,14 @@ function SG.UI.PaintStep(row)
 end
 
 function SG.UI.RefreshTabs()
-    HidePool(SG.UI.tabPool)
-    local x = 8
-    local function tab(id, label, closable)
-        local button = Acquire(SG.UI.tabPool, SG.UI.tabbar, function(parent)
-            local created = CreateFrame("Button", nil, parent)
-            created:SetHeight(26)
-            local bg = created:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            created.bg = bg
-            local text = SG.Widgets.Text(created, 11)
-            text:SetPoint("LEFT", 8, 0)
-            text:SetJustifyH("LEFT")
-            created.label = text
-            local ex = CreateFrame("Button", nil, created)
-            ex:SetSize(16, 16)
-            ex:SetPoint("RIGHT", -4, 0)
-            local exText = SG.Widgets.Text(ex, 11)
-            exText:SetPoint("CENTER")
-            exText:SetText("x")
-            created.ex = ex
-            created.exText = exText
-            return created
-        end)
-        button:ClearAllPoints()
-        button:SetPoint("LEFT", SG.UI.tabbar, "LEFT", x, -4)
-        local width = closable and 118 or 72
-        button:SetWidth(width)
-        button.label:SetText(label)
-        button.label:ClearAllPoints()
-        button.label:SetPoint("LEFT", 8, 0)
-        button.label:SetWidth(closable and 88 or 56)
-        local on = SG.state.tab == id and SG.db.category ~= "options"
-        if id == "home" then on = SG.state.tab == "home" and SG.db.category ~= "options" end
-        SG.Paint(button.bg, on and T.rowOn or T.inset)
-        button.label:SetTextColor(SG.RGB(on and T.text or T.muted))
-        button:SetScript("OnClick", function()
-            if id == "home" then
-                local direct = SG.UI.DirectId()
-                if direct and SG.Engine.Get(direct) then
-                    SG.state.tab = direct
-                    SG.db.selected = direct
-                else
-                    SG.state.tab = "home"
-                end
-                if SG.db.category == "options" then SG.db.category = "leveling" end
-            else
-                SG.state.tab = id
-                if SG.db.category == "options" then SG.db.category = "leveling" end
-                SG.db.selected = id
-                SG.char.active = id
-                local guide = SG.Engine.Get(id)
-                if guide then SG.Engine.CatchUp(guide, false) end
-                SG.state.stepIndex = guide and SG.Engine.ShownIndex(guide) or nil
-                if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
-            end
-            SG.UI.Refresh(true)
-        end)
-        if closable then
-            button.ex:Show()
-            button.ex:SetScript("OnClick", function() SG.UI.CloseTab(id) end)
-        else
-            button.ex:Hide()
-        end
-        x = x + width + 4
-    end
-    tab("home", "Guides", false)
-    local tabs = SG.db.tabs or {}
-    for i = 1, #tabs do
-        local guide = SG.Engine.Get(tabs[i])
-        if guide then tab(guide.id, Short(guide.title, 16), true) end
-    end
-end
-
-local function FactionLabel()
-    local mode = SG.db.options.faction or "auto"
-    if mode == "auto" then return "Faction: " .. SG.SideName(SG.playerSide) end
-    if mode == "both" then return "Faction: Both" end
-    return "Faction: " .. SG.SideName(mode)
+    if SG.UI.tabPool then HidePool(SG.UI.tabPool) end
 end
 
 local function Passes(guide, category, faction, query)
     if guide.empty then return false end
-    if category == "favorites" then
-        if not SG.db.favorites[guide.id] then return false end
-    elseif guide.category ~= category then
-        return false
-    end
+    if guide.category ~= category then return false end
     if category == "professions" and guide.recipes then return false end
-    if faction ~= "both" and guide.side ~= "B" and guide.side ~= faction then
-        return false
-    end
+    if guide.side ~= "B" and guide.side ~= faction then return false end
     return SG.Engine.Matches(guide, query)
 end
 
@@ -1334,11 +1184,6 @@ function SG.UI.RefreshHome(resetScroll)
             local done, total = SG.Engine.Stats(guide)
             row.sub:SetText(string.format("%d-%d   %s   %d steps", guide.min or 1, guide.max or 60, SG.SideName(guide.side), total))
             row.mini:SetPercent(total > 0 and (done / total) or 0, total > 0 and done == total)
-            if SG.db.favorites[guide.id] then
-                row.star:SetVertexColor(1, 0.82, 0.35, 1)
-            else
-                row.star:SetVertexColor(0.5, 0.5, 0.55, 0.35)
-            end
             SG.UI.PaintGuide(row)
             y = y + 62
         end
@@ -1352,6 +1197,117 @@ function SG.UI.RefreshHome(resetScroll)
     end
     content:SetHeight(math.max(y + 12, scroll:GetHeight() + 1))
     if resetScroll then SG.UI.homeScroll:Reset() else SG.UI.homeScroll.Update() end
+end
+
+function SG.UI.FillStepRow(row, step, width, guide)
+    local index = row.index or step.index
+    local done = index and SG.Engine.IsDone(guide, index) or false
+    row.done = done and true or false
+    row.bisFrom = step.bisFrom
+    local itemID = step.itemID
+    if not itemID and step.rewards and SG.BiS and SG.BiS.BestReward and SG.Specs and SG.Specs.Selected then
+        itemID = SG.BiS.BestReward({ rewards = step.rewards }, SG.Specs.Selected())
+    end
+    if not itemID and step.rewards then itemID = step.rewards[1] end
+    local iconTex
+    if itemID and SG.ItemName then
+        iconTex = select(4, SG.ItemName(itemID))
+    end
+    if (not iconTex) and step.icon and step.icon ~= "" then iconTex = step.icon end
+    local showIcon = itemID ~= nil or (step.icon ~= nil and step.icon ~= "")
+    if row.icon then
+        if showIcon then
+            row.icon:Show()
+            row.icon.itemID = itemID
+            if iconTex then
+                row.icon.tex:SetTexture(iconTex)
+            else
+                row.icon.tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            end
+        else
+            row.icon.itemID = nil
+            row.icon:Hide()
+        end
+    end
+    local pinned = SG.Pins and SG.Pins.Has and index and SG.Pins.Has(guide, index)
+    if row.pin and row.pin.label then
+        row.pin.label:SetText(pinned and "Unpin" or "Pin")
+        row.pin:Show()
+    end
+    local chained = SG.HasChain and SG.HasChain(step) and true or false
+    if row.chain then
+        if chained then row.chain:Show() else row.chain:Hide() end
+    end
+    local left = showIcon and 48 or 12
+    local rightPad = chained and 78 or 58
+    local textW = width - 16 - left - rightPad
+    if textW < 40 then textW = 40 end
+    local main = step.title
+    if not main or main == "" then main = step.text or "" end
+    if done then main = "Done  " .. main end
+    row.title:ClearAllPoints()
+    row.title:SetPoint("TOPLEFT", left, -6)
+    row.title:SetWidth(textW)
+    row.title:SetWordWrap(true)
+    row.title:SetText(main)
+    row.title:SetHeight(4000)
+    local textH = row.title:GetStringHeight() or 0
+    if textH < 14 then
+        local per = math.floor(textW / 6.5)
+        if per < 8 then per = 8 end
+        textH = math.ceil((#main > 0 and #main or 1) / per) * 14
+        if textH < 14 then textH = 14 end
+    end
+    row.title:SetHeight(textH)
+    local bits = {}
+    if step.level and (step.questID or step.kind == "farm" or step.kind == "gear" or step.kind == "run" or step.kind == "path") then
+        bits[#bits + 1] = "Lv " .. step.level
+    end
+    if step.optional then bits[#bits + 1] = "(Optional)" end
+    if step.bisFrom == "level" then
+        bits[#bits + 1] = "Level BiS"
+    elseif step.bisFrom == "upgrade" then
+        bits[#bits + 1] = "Upgrade"
+    elseif step.match == "path" and not step.optional then
+        bits[#bits + 1] = "Starting zone"
+    end
+    if step.gearName then bits[#bits + 1] = step.gearName end
+    if step.dropLine then bits[#bits + 1] = step.dropLine end
+    if step.placeName and step.placeName ~= "" then bits[#bits + 1] = step.placeName end
+    if step.x and step.y then
+        bits[#bits + 1] = string.format("%.1f, %.1f", step.x, step.y)
+    end
+    local sub = table.concat(bits, "   ")
+    row.sub:ClearAllPoints()
+    row.sub:SetPoint("TOPLEFT", left, -(8 + textH))
+    row.sub:SetWidth(textW)
+    row.sub:SetWordWrap(true)
+    row.sub:SetText(sub)
+    local subH = 0
+    if sub ~= "" then
+        row.sub:Show()
+        row.sub:SetHeight(4000)
+        subH = row.sub:GetStringHeight() or 0
+        if subH < 14 then subH = 14 end
+        row.sub:SetHeight(subH)
+    else
+        row.sub:Hide()
+        row.sub:SetHeight(1)
+    end
+    local height = 8 + textH + 4 + subH + 8
+    if height < 48 then height = 48 end
+    local rowW = width - 16
+    if rowW < 40 then rowW = 40 end
+    row:SetSize(rowW, height)
+    if step.bisFrom == "level" then
+        row.sub:SetTextColor(SG.RGB(T.gold))
+    elseif step.bisFrom == "upgrade" then
+        row.sub:SetTextColor(SG.RGB(T.good))
+    else
+        row.sub:SetTextColor(SG.RGB(T.muted))
+    end
+    SG.UI.PaintStep(row)
+    return height
 end
 
 function SG.UI.RefreshSteps(resetScroll)
@@ -1376,6 +1332,19 @@ function SG.UI.RefreshSteps(resetScroll)
         if step.title and step.title:lower():find(query, 1, true) then return true end
         if step.segment and step.segment:lower():find(query, 1, true) then return true end
         if step.text and step.text:lower():find(query, 1, true) then return true end
+        if step.dropLine and step.dropLine:lower():find(query, 1, true) then return true end
+        if step.gearName and step.gearName:lower():find(query, 1, true) then return true end
+        if step.placeName and step.placeName:lower():find(query, 1, true) then return true end
+        if step.rewards and SG.ItemName then
+            for n = 1, #step.rewards do
+                local name = SG.ItemName(step.rewards[n], true)
+                if name and name:lower():find(query, 1, true) then return true end
+            end
+        end
+        if step.itemID and SG.ItemName then
+            local name = SG.ItemName(step.itemID, true)
+            if name and name:lower():find(query, 1, true) then return true end
+        end
         return false
     end
     local y = 4
@@ -1397,55 +1366,10 @@ function SG.UI.RefreshSteps(resetScroll)
             if i == shown then focusAt = y end
             local row = Acquire(SG.UI.stepPool, content, StepRow)
             row.index = i
-            row.done = SG.Engine.IsDone(guide, i)
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -y)
-            local prefix = row.done and "Done  " or ""
-            local chained = SG.HasChain and SG.HasChain(step)
-            row.title:ClearAllPoints()
-            row.title:SetPoint("TOPLEFT", 12, -6)
-            row.title:SetPoint("RIGHT", chained and -28 or -8, 0)
-            if chained then row.chain:Show() else row.chain:Hide() end
-            row.title:SetText(prefix .. step.title)
-            local bits = {}
-            if step.level and (step.questID or step.kind == "farm" or step.kind == "gear" or step.kind == "run" or step.kind == "path") then
-                bits[#bits + 1] = "Lv " .. step.level
-            end
-            if step.optional then bits[#bits + 1] = "(Optional)" end
-            if step.bisFrom == "level" then
-                bits[#bits + 1] = "Level BiS"
-            elseif step.bisFrom == "upgrade" then
-                bits[#bits + 1] = "Upgrade"
-            elseif step.match == "path" and not step.optional then
-                bits[#bits + 1] = "Starting zone"
-            end
-            if step.gearName then
-                bits[#bits + 1] = step.gearName
-            end
-            if step.dropLine then
-                bits[#bits + 1] = step.dropLine
-            end
-            if step.placeName and step.placeName ~= "" then
-                bits[#bits + 1] = step.placeName
-            end
-            if step.x and step.y then
-                bits[#bits + 1] = string.format("%.1f, %.1f", step.x, step.y)
-            end
-            row.sub:SetWordWrap(true)
-            row.sub:SetText(table.concat(bits, "   "))
-            local tall = step.dropLine and #step.dropLine > 42
-            row:SetSize(math.max(40, width - 16), tall and 64 or 48)
-            row.sub:SetHeight(tall and 32 or 16)
-            row.bisFrom = step.bisFrom
-            if step.bisFrom == "level" then
-                row.sub:SetTextColor(SG.RGB(T.gold))
-            elseif step.bisFrom == "upgrade" then
-                row.sub:SetTextColor(SG.RGB(T.good))
-            else
-                row.sub:SetTextColor(SG.RGB(T.muted))
-            end
-            SG.UI.PaintStep(row)
-            y = y + (step.dropLine and #step.dropLine > 42 and 68 or 52)
+            local height = SG.UI.FillStepRow(row, step, width, guide)
+            y = y + height + 4
         end
     end
     content:SetHeight(math.max(y + 12, scroll:GetHeight() + 1))
@@ -1566,6 +1490,7 @@ local function LayoutDetail(detail, step)
     push(detail.primary, 40, true, false)
     push(detail.secondary, 34, true, false)
     push(detail.tertiary, 34, true, false)
+    push(detail.pin, 34, true, false)
     push(detail.reset, 22, false, false)
     local items = detail.items or {}
     local rewardCount = 0
@@ -1624,13 +1549,12 @@ function SG.UI.RefreshDetail()
         detail.primary:Hide()
         detail.secondary:Hide()
         detail.tertiary:Hide()
+        detail.pin:Hide()
         detail.reset:Hide()
-        detail.star:Hide()
         ShowRewards(detail, nil)
         LayoutDetail(detail, nil)
         return
     end
-    detail.star:Show()
     if not guide then
         detail.eyebrow:SetText("STRATAGEM")
         detail.title:SetText("Pick a guide")
@@ -1643,6 +1567,7 @@ function SG.UI.RefreshDetail()
         detail.primary:Hide()
         detail.secondary:Hide()
         detail.tertiary:Hide()
+        detail.pin:Hide()
         detail.reset:Hide()
         ShowRewards(detail, nil)
         LayoutDetail(detail, nil)
@@ -1650,13 +1575,12 @@ function SG.UI.RefreshDetail()
     end
     local done, total = SG.Engine.Stats(guide)
     local percent = total > 0 and (done / total) or 0
-    local fav = SG.db.favorites[guide.id]
-    detail.star.tex:SetVertexColor(1, 0.82, 0.35, fav and 1 or 0.35)
     detail.bar:SetPercent(percent, total > 0 and done == total)
     detail.percent:SetText(string.format("%s    %d / %d steps", PercentText(done, total), done, total))
     detail.primary:Show()
-    detail.secondary:Show()
-    detail.tertiary:Show()
+    detail.secondary:Hide()
+    detail.tertiary:Hide()
+    detail.pin:Hide()
     detail.reset:Show()
 
     local stepMode = SG.state.tab == guide.id
@@ -1725,9 +1649,19 @@ function SG.UI.RefreshDetail()
             SG.UI.Refresh(false)
             SG.Tracker.Update()
         end)
+        detail.tertiary:Show()
         detail.tertiary:SetLabel("Next step")
         detail.tertiary:SetScript("OnClick", function() SG.Engine.Nudge(1) end)
-        ShowRewards(detail, step)
+        detail.secondary:Show()
+        detail.pin:Show()
+        detail.pin:SetLabel((SG.Pins and SG.Pins.Has and SG.Pins.Has(guide, step.index or SG.state.stepIndex)) and "Unpin" or "Pin")
+        detail.pin:SetScript("OnClick", function()
+            if SG.Pins and SG.Pins.Toggle then
+                SG.Pins.Toggle(guide, step.index or SG.state.stepIndex)
+                SG.UI.Refresh(false)
+            end
+        end)
+        ShowRewards(detail, nil)
         LayoutDetail(detail, step)
     else
         detail.eyebrow:SetText(guide.group or "GUIDE")
@@ -1750,12 +1684,7 @@ function SG.UI.RefreshDetail()
             detail.primary:Enable()
         end
         detail.primary:SetScript("OnClick", function() SG.UI.Continue(guide.id) end)
-        detail.secondary:SetLabel("Open in tab")
-        detail.secondary:SetScript("OnClick", function() SG.UI.OpenInPlace(guide.id) end)
-        detail.tertiary:SetLabel("Open in new tab")
-        detail.tertiary:SetScript("OnClick", function() SG.UI.OpenTab(guide.id) end)
-        local nextStep = index and guide.steps[index] or nil
-        ShowRewards(detail, nextStep)
+        ShowRewards(detail, nil)
         LayoutDetail(detail, nil)
     end
     detail.primary:Paint(false)
@@ -1787,13 +1716,13 @@ function SG.UI.Refresh(resetScroll)
     for i = 1, #SG.UI.categories do
         SG.UI.PaintCategory(SG.UI.categories[i])
     end
-    SG.UI.factionButton:SetLabel(FactionLabel())
     SG.UI.RefreshTabs()
 
     local direct = SG.UI.DirectId()
     if direct and SG.Engine.Get(direct) and SG.state.tab ~= direct and SG.db.category ~= "options" then
         SG.state.tab = direct
         SG.db.selected = direct
+        SG.state.stepIndex = nil
     end
     if SG.UI.SyncProfBar then SG.UI.SyncProfBar() end
 
@@ -1841,7 +1770,7 @@ end
 
 function SG.UI.OnItem()
     if SG.UI.frame and SG.UI.frame:IsShown() then
-        SG.UI.RefreshDetail()
+        SG.UI.Refresh(false)
     end
 end
 

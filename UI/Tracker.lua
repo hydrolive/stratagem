@@ -456,5 +456,6 @@ function SG.Tracker.Update()
         end
     end
     SG.Tracker.updating = false
+    if SG.Pins and SG.Pins.Update and not SG.Pins.painting then SG.Pins.Update() end
     if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
 end

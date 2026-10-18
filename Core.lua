@@ -26,6 +26,7 @@ SG.DB_DEFAULTS = {
         x = 0,
         y = 0,
         tracker = { point = "BOTTOM", rel = "BOTTOM", x = 280, y = 210 },
+        pins = { point = "TOPRIGHT", rel = "TOPRIGHT", x = -20, y = -220 },
         arrow = { point = "CENTER", rel = "CENTER", x = 0, y = 230 },
     },
     options = {
@@ -56,6 +57,7 @@ SG.CHAR_DEFAULTS = {
     active = nil,
     progress = {},
     kills = {},
+    pins = {},
 }
 
 function SG.CopyDefaults(dst, src)
@@ -123,9 +125,8 @@ function SG.SideName(side)
 end
 
 function SG.FactionFilter()
-    local mode = SG.db and SG.db.options.faction or "auto"
-    if mode == "A" or mode == "H" or mode == "both" then return mode end
-    return SG.playerSide or "H"
+    if SG.playerSide == "A" or SG.playerSide == "H" then return SG.playerSide end
+    return SG.PlayerSide()
 end
 
 function SG.ItemName(itemID, quiet)
@@ -389,7 +390,10 @@ function SG.InitDB()
     if type(SG.db.tabs) ~= "table" then SG.db.tabs = {} end
     if type(SG.char.progress) ~= "table" then SG.char.progress = {} end
     if type(SG.char.kills) ~= "table" then SG.char.kills = {} end
-    if SG.db.category == "all" or SG.db.category == nil then SG.db.category = "leveling" end
+    if type(SG.char.pins) ~= "table" then SG.char.pins = {} end
+    if SG.db.category == "all" or SG.db.category == nil or SG.db.category == "dungeons" or SG.db.category == "favorites" then
+        SG.db.category = "leveling"
+    end
     if SG.db.gearTab ~= "quest" and SG.db.gearTab ~= "profession" and SG.db.gearTab ~= "auction" and SG.db.gearTab ~= "world" and SG.db.gearTab ~= "reputation" then
         SG.db.gearTab = "quest"
     end
@@ -447,16 +451,26 @@ function SG.OnLogin()
     SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
     if SG.db.category == "bis" then
         SG.state.tab = "bis-60"
+        SG.db.selected = "bis-60"
+    elseif SG.db.category == "collectibles" then
+        SG.state.tab = "collect-all"
+        SG.db.selected = "collect-all"
     elseif SG.db.category == "leveling" and active then
         SG.state.tab = active.id
     end
     SG.UI.Create()
     SG.Minimap.Create()
     SG.Tracker.Create()
+    if SG.Pins and SG.Pins.Create then SG.Pins.Create() end
     SG.Arrow.Create()
     if active and SG.db.category ~= "bis" then
         local index = SG.Engine.ShownIndex(active)
         if index then SG.Engine.Focus(active, index, true) end
+    end
+    if SG.db.category == "collectibles" then
+        SG.state.tab = "collect-all"
+        SG.db.selected = "collect-all"
+        SG.state.stepIndex = nil
     end
     if SG.db.category == "professions" and SG.db.profTab == "recipes" then
         SG.state.tab = "prof-recipes"
@@ -580,6 +594,9 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         if SG.classToken and SG.Gear and SG.Gear.Start then SG.Gear.Start() end
         if SG.Gear and SG.Gear.OnEquip then SG.Gear.OnEquip() end
         if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
+        if SG.classToken and SG.Collectibles and SG.Collectibles.Refresh then
+            SG.Collectibles.Refresh()
+        end
     elseif event == "ADDON_LOADED" and SG.classToken and (
         arg1 == "NaowhForever" or arg1 == "NaowhForever_BiS" or arg1 == "NaowhForever_DungeonJournal"
         or arg1 == "NaowhForever_Professions" or arg1 == "NaowhForever_QoL"
@@ -624,5 +641,7 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
     elseif event == "AUCTION_HOUSE_CLOSED" then
         if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
+    elseif event == "COMPANION_LEARNED" or event == "NEW_PET_ADDED" or event == "NEW_TOY_ADDED" then
+        if SG.Collectibles and SG.Collectibles.Refresh then SG.Collectibles.Refresh() end
     end
 end)

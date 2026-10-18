@@ -711,16 +711,6 @@ SG.GuideData = {
     }),
 
     Guide({
-        id = "dyn-dungeons",
-        title = "Dungeon BiS quests",
-        group = "Dungeons",
-        category = "dungeons",
-        side = "B",
-        place = "Dungeons",
-        dynamic = "dungeons",
-        blurb = "Every catalog quest that is completed inside a dungeon, grouped by instance and sorted by level. Your class, race, and spec still filter the list.",
-    }),
-    Guide({
         id = "dyn-explore-h",
         title = "Horde zones",
         group = "Exploration",
@@ -749,25 +739,5 @@ SG.GuideData = {
         place = "Class halls",
         dynamic = "class",
         blurb = "Call of Fire, the brutal and polished armor sets, Aquatic Form, the Orb of Soran'ruk, and the other class-only BiS quests.",
-    }),
-    Guide({
-        id = "dyn-choices-h",
-        title = "Choice rewards",
-        group = "Collectibles",
-        category = "collectibles",
-        side = "H",
-        place = "Horde",
-        dynamic = "choices",
-        blurb = "Horde turn-ins that let you choose a reward. Take the piece ranked for your spec. The others are worth a look before you vendor them.",
-    }),
-    Guide({
-        id = "dyn-choices-a",
-        title = "Choice rewards",
-        group = "Collectibles",
-        category = "collectibles",
-        side = "A",
-        place = "Alliance",
-        dynamic = "choices",
-        blurb = "Alliance turn-ins that let you choose a reward. Take the piece ranked for your spec.",
     }),
 }
