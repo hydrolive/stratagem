@@ -133,7 +133,20 @@ local function ItemBind(itemID)
     return nil
 end
 
+local function AskedMap()
+    local asked = SG.Recipes.asked
+    if type(asked) ~= "table" then
+        asked = {}
+        SG.Recipes.asked = asked
+    end
+    return asked
+end
+
 local function AskRecipe(itemID)
+    if type(itemID) ~= "number" or itemID <= 0 then return end
+    local asked = AskedMap()
+    if asked[itemID] then return end
+    asked[itemID] = true
     if C_Item and C_Item.RequestLoadItemDataByID then
         pcall(C_Item.RequestLoadItemDataByID, itemID)
     elseif RequestLoadItemDataByID then
@@ -142,12 +155,8 @@ local function AskRecipe(itemID)
 end
 
 -- Auctionator's public price is copper from the last scan. Nil means it has no row.
-local function AuctionSentence(itemID)
-    local bind = ItemBind(itemID)
-    if bind == nil then
-        AskRecipe(itemID)
-        return nil
-    end
+-- bind is the client value already read by the caller. This does not ask for the item.
+local function AuctionSentence(itemID, bind)
     if bind ~= 2 then return "" end
     local api = Auctionator and Auctionator.API and Auctionator.API.v1
     local get = api and api.GetAuctionPriceByItemID
@@ -1233,14 +1242,38 @@ function SG.Recipes.Apply(guide)
     local row
     if SG.Engine and SG.Engine.Progress then row = SG.Engine.Progress(guide.id) end
     local any = false
+    local asks = 0
+    SG.Recipes.pending = false
     for i = 1, #guide.steps do
         local step = guide.steps[i]
         if not step.recipeNote then
             local known = SpellKnown(step.spell)
             local closed = known or (row and row.done[i] and true or false)
             if known and row and row.hold ~= i then row.done[i] = true end
-            if step.worldDrop and type(step.itemID) == "number" then
-                local extra, money = AuctionSentence(step.itemID)
+            local onTab = (not chosen) or step.profId == chosen
+            if step.worldDrop and onTab and type(step.itemID) == "number" then
+                if step.bind == nil then
+                    local asked = AskedMap()
+                    if asked[step.itemID] then
+                        local bind = ItemBind(step.itemID)
+                        if type(bind) == "number" then step.bind = bind end
+                    elseif asks >= 16 then
+                        SG.Recipes.pending = true
+                    else
+                        local bind = ItemBind(step.itemID)
+                        if type(bind) == "number" then
+                            step.bind = bind
+                        else
+                            asks = asks + 1
+                            AskRecipe(step.itemID)
+                            SG.Recipes.pending = true
+                        end
+                    end
+                end
+                local extra, money
+                if type(step.bind) == "number" then
+                    extra, money = AuctionSentence(step.itemID, step.bind)
+                end
                 local body = step.baseText or step.text or ""
                 if type(extra) == "string" then
                     step.text = body .. extra
@@ -1258,7 +1291,6 @@ function SG.Recipes.Apply(guide)
                     step.dropLine = step.baseLine ~= "" and step.baseLine or nil
                 end
             end
-            local onTab = (not chosen) or step.profId == chosen
             if closed or not onTab then
                 step.visible = false
             else
@@ -1301,11 +1333,24 @@ function SG.Recipes.Install(quiet)
     if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
 end
 
-function SG.Recipes.Refresh()
+function SG.Recipes.Pace()
+    if SG.Recipes.pacing or not SG.Recipes.pending then return end
+    SG.Recipes.pacing = true
+    SG.After(0.6, function()
+        SG.Recipes.pacing = false
+        if not SG.Recipes.pending then return end
+        local guide = SG.Engine and SG.Engine.Get and SG.Engine.Get(GUIDE_ID)
+        if guide then SG.Recipes.Apply(guide) end
+        if SG.Recipes.pending then SG.Recipes.Pace() end
+    end)
+end
+
+function SG.Recipes.Refresh(quiet)
     if SG.Recipes.WatchPrices then SG.Recipes.WatchPrices() end
     local current = SG.Engine and SG.Engine.Get and SG.Engine.Get(GUIDE_ID)
     if not current or current.profKey ~= DataKey() then
-        SG.Recipes.Install()
+        SG.Recipes.Install(quiet and true or false)
+        if not quiet and SG.Recipes.pending then SG.Recipes.Pace() end
         return
     end
     SG.Recipes.Apply(current)
@@ -1313,8 +1358,10 @@ function SG.Recipes.Refresh()
     if active and active.recipes and SG.Engine.PlaceCursor then
         SG.Engine.PlaceCursor(active)
     end
+    if quiet then return end
     if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
     if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+    if SG.Recipes.pending then SG.Recipes.Pace() end
 end
 
 function SG.Recipes.WatchPrices()
@@ -1330,26 +1377,19 @@ end
 
 function SG.Recipes.OnItem(itemID)
     if type(itemID) ~= "number" then return end
+    local asked = SG.Recipes.asked
+    if type(asked) ~= "table" or not asked[itemID] then return end
     if SG.Recipes.itemWait then return end
-    local guide = SG.Engine and SG.Engine.Get and SG.Engine.Get(GUIDE_ID)
-    if not guide or not guide.steps then return end
-    local hit = false
-    for i = 1, #guide.steps do
-        local step = guide.steps[i]
-        if step.itemID == itemID and step.worldDrop then
-            hit = true
-            break
-        end
-    end
-    if not hit then return end
     SG.Recipes.itemWait = true
-    SG.After(0.2, function()
+    SG.After(0.4, function()
         SG.Recipes.itemWait = false
         local current = SG.Engine and SG.Engine.Get and SG.Engine.Get(GUIDE_ID)
         if current then SG.Recipes.Apply(current) end
         local active = SG.Engine and SG.Engine.Active and SG.Engine.Active()
-        if not active or not active.recipes then return end
+        local showing = (active and active.recipes) or (SG.state and SG.state.tab == GUIDE_ID)
+        if not showing then return end
         if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
         if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+        if SG.Recipes.pending then SG.Recipes.Pace() end
     end)
 end

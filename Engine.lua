@@ -374,6 +374,28 @@ local function ApplyVisibility(steps)
     return hiddenQuests
 end
 
+-- onlyMySpec hides steps that are already compiled as match "other".
+-- Gear, recipes, and collectibles keep the result of their own filters.
+function SG.Engine.ApplySpecFilter()
+    local guides = SG.Engine.guides or {}
+    for g = 1, #guides do
+        local guide = guides[g]
+        if guide.compiled and guide.steps then
+            local hidden = ApplyVisibility(guide.steps)
+            local visibleQuests = 0
+            for i = 1, #guide.steps do
+                local step = guide.steps[i]
+                if step.visible and (step.kind == "accept" or step.kind == "gear") then
+                    visibleQuests = visibleQuests + 1
+                end
+            end
+            guide.hiddenQuests = hidden
+            guide.visibleQuests = visibleQuests
+            guide.empty = visibleQuests == 0 and not guide.keep
+        end
+    end
+end
+
 local function CountLevels(steps)
     local minLevel, maxLevel, quests = nil, nil, 0
     for i = 1, #steps do
@@ -710,6 +732,7 @@ function SG.Engine.Compile(def)
         empty = visibleQuests == 0 and not def.keep,
         route = def.route and true or false,
         keep = def.keep and true or false,
+        compiled = true,
     }
     if SG.Gear and SG.Gear.Apply then SG.Gear.Apply(guide) end
     if SG.Route and SG.Route.PaintGuide then SG.Route.PaintGuide(guide) end
@@ -836,6 +859,7 @@ function SG.Engine.Rebuild()
         for i = 1, #list do add(list[i]) end
     end
     if SG.Collectibles and SG.Collectibles.Install then SG.Collectibles.Install(true) end
+    if SG.Legacy and SG.Legacy.Install then SG.Legacy.Install(true) end
     if SG.Recipes and SG.Recipes.Install then SG.Recipes.Install(true) end
     if SG.ProfPath and SG.ProfPath.Install then SG.ProfPath.Install(true) end
     if SG.Reputation and SG.Reputation.Install then SG.Reputation.Install(true) end
@@ -1147,6 +1171,7 @@ function SG.Engine.CatchUp(guide, fromSelection)
     if SG.RefreshQuestCache then SG.RefreshQuestCache() end
     if guide.gear and SG.Gear and SG.Gear.Filter then SG.Gear.Filter(guide) end
     if guide.recipes and SG.Recipes and SG.Recipes.Apply then SG.Recipes.Apply(guide) end
+    if guide.legacy and SG.Legacy and SG.Legacy.Apply then SG.Legacy.Apply(guide) end
     if guide.profPath and SG.ProfPath and SG.ProfPath.Prepare then
         SG.ProfPath.Prepare(guide.id)
         guide = SG.Engine.Get(guide.id) or guide

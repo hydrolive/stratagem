@@ -109,7 +109,7 @@ function SG.UI.OpenProfessionRecipes(profId)
     SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
     SG.state.tab = "prof-recipes"
     SG.db.selected = "prof-recipes"
-    if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
+    if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh(true) end
     local guide = SG.Engine and SG.Engine.Get and SG.Engine.Get("prof-recipes")
     if guide and SG.Engine.Focus then
         SG.Engine.Focus(guide, SG.Engine.ShownIndex(guide), true)
@@ -117,6 +117,7 @@ function SG.UI.OpenProfessionRecipes(profId)
     if SG.UI.frame then SG.UI.frame:Show() end
     if SG.UI.Refresh then SG.UI.Refresh(true) end
     if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+    if SG.Recipes and SG.Recipes.pending and SG.Recipes.Pace then SG.Recipes.Pace() end
 end
 
 function SG.UI.OpenProfessionGuides()
@@ -483,7 +484,7 @@ function SG.UI.Create()
     showSpecs:SetPoint("TOPLEFT", 0, -40)
     showSpecs:SetScript("OnClick", function()
         SG.db.options.onlyMySpec = false
-        SG.Engine.Rebuild()
+        if SG.Engine.ApplySpecFilter then SG.Engine.ApplySpecFilter() end
         if SG.db.options.autoAdvance then SG.Engine.SyncAll() end
         SG.UI.Refresh(true)
     end)
@@ -739,7 +740,7 @@ function SG.UI.BuildOptions(parent)
     end)
     checks[#checks + 1] = addCheck("Hide rewards meant for other specs", function() return SG.db.options.onlyMySpec end, function(on)
         SG.db.options.onlyMySpec = on
-        SG.Engine.Rebuild()
+        if SG.Engine.ApplySpecFilter then SG.Engine.ApplySpecFilter() end
         if SG.db.options.autoAdvance then SG.Engine.SyncAll() end
         SG.UI.Refresh(true)
     end)
@@ -1210,8 +1211,16 @@ function SG.UI.FillStepRow(row, step, width, guide)
     end
     if not itemID and step.rewards then itemID = step.rewards[1] end
     local iconTex
-    if itemID and SG.ItemName then
-        iconTex = select(4, SG.ItemName(itemID))
+    if itemID then
+        if GetItemIcon then
+            iconTex = GetItemIcon(itemID)
+        elseif C_Item and C_Item.GetItemIconByID then
+            local ok, tex = pcall(C_Item.GetItemIconByID, itemID)
+            if ok and tex and tex ~= "" then iconTex = tex end
+        end
+        if (not iconTex or iconTex == "") and SG.ItemName then
+            iconTex = select(4, SG.ItemName(itemID, true))
+        end
     end
     if (not iconTex) and step.icon and step.icon ~= "" then iconTex = step.icon end
     local showIcon = itemID ~= nil or (step.icon ~= nil and step.icon ~= "")
@@ -1250,12 +1259,12 @@ function SG.UI.FillStepRow(row, step, width, guide)
     row.title:SetWidth(textW)
     row.title:SetWordWrap(true)
     row.title:SetText(main)
-    row.title:SetHeight(4000)
-    local textH = row.title:GetStringHeight() or 0
-    if textH < 14 then
-        local per = math.floor(textW / 6.5)
-        if per < 8 then per = 8 end
-        textH = math.ceil((#main > 0 and #main or 1) / per) * 14
+    local per = math.floor(textW / 6.5)
+    if per < 8 then per = 8 end
+    local textH = 14
+    if main:find("\n", 1, true) or #main > per then
+        row.title:SetHeight(4000)
+        textH = row.title:GetStringHeight() or 14
         if textH < 14 then textH = 14 end
     end
     row.title:SetHeight(textH)
@@ -1286,8 +1295,12 @@ function SG.UI.FillStepRow(row, step, width, guide)
     local subH = 0
     if sub ~= "" then
         row.sub:Show()
-        row.sub:SetHeight(4000)
-        subH = row.sub:GetStringHeight() or 0
+        if sub:find("\n", 1, true) or #sub > per then
+            row.sub:SetHeight(4000)
+            subH = row.sub:GetStringHeight() or 14
+        else
+            subH = 14
+        end
         if subH < 14 then subH = 14 end
         row.sub:SetHeight(subH)
     else
@@ -1769,9 +1782,8 @@ function SG.UI.Refresh(resetScroll)
 end
 
 function SG.UI.OnItem()
-    if SG.UI.frame and SG.UI.frame:IsShown() then
-        SG.UI.Refresh(false)
-    end
+    -- Recipe and gear item replies refresh themselves. A full paint per reply
+    -- kept the client busy for about a minute after Professions opened.
 end
 
 if not StaticPopupDialogs.STRATAGEM_RESET_GUIDE then
