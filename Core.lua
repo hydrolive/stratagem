@@ -396,6 +396,9 @@ function SG.InitDB()
     if SG.db.profTab ~= "guides" and SG.db.profTab ~= "recipes" then
         SG.db.profTab = "guides"
     end
+    if type(SG.db.recipeProf) ~= "number" or SG.db.recipeProf <= 0 then
+        SG.db.recipeProf = nil
+    end
 end
 
 function SG.OnLogin()

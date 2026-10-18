@@ -892,6 +892,10 @@ end
 function SG.Engine.Stats(guide)
     local required, done = 0, 0
     if not guide then return 0, 0 end
+    local chosen
+    if guide.recipes and SG.Recipes and SG.Recipes.Selected then
+        chosen = SG.Recipes.Selected(guide)
+    end
     for i = 1, #guide.steps do
         local step = guide.steps[i]
         if guide.gear then
@@ -900,7 +904,7 @@ function SG.Engine.Stats(guide)
                 if step.gearState == "done" or SG.Engine.IsDone(guide, i) then done = done + 1 end
             end
         elseif guide.recipes then
-            if step.spell then
+            if step.spell and (not chosen or step.profId == chosen) then
                 required = required + 1
                 if SG.Engine.IsDone(guide, i) then done = done + 1 end
             end

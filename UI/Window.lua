@@ -176,11 +176,12 @@ local function PercentText(done, total)
     return string.format("%d%%", math.floor((done / total) * 100 + 0.5))
 end
 
-function SG.UI.OpenProfessionRecipes()
+function SG.UI.OpenProfessionRecipes(profId)
     if not SG.db then return end
     if not SG.UI.frame then SG.UI.Create() end
     SG.db.profTab = "recipes"
     SG.db.category = "professions"
+    if type(profId) == "number" and profId > 0 then SG.db.recipeProf = profId end
     SG.state = SG.state or { query = "", tab = "home", stepIndex = nil }
     SG.state.tab = "prof-recipes"
     SG.db.selected = "prof-recipes"
@@ -203,6 +204,91 @@ function SG.UI.OpenProfessionGuides()
     if SG.UI.Refresh then SG.UI.Refresh(true) end
 end
 
+function SG.UI.ProfEntries()
+    local entries = { { kind = "guides", label = "Guides" } }
+    local guide = SG.Engine and SG.Engine.Get and SG.Engine.Get("prof-recipes")
+    local tabs = (SG.Recipes and SG.Recipes.Tabs and SG.Recipes.Tabs(guide)) or {}
+    if #tabs == 0 then
+        entries[#entries + 1] = { kind = "recipes", label = "Recipes" }
+        return entries
+    end
+    for i = 1, #tabs do
+        entries[#entries + 1] = { kind = "recipes", id = tabs[i].id, label = tabs[i].name }
+    end
+    return entries
+end
+
+function SG.UI.EnsureProfButton(bar, index)
+    local buttons = SG.UI.profTabButtons
+    if not buttons then
+        buttons = {}
+        SG.UI.profTabButtons = buttons
+    end
+    local button = buttons[index]
+    if button then return button end
+    button = SG.Widgets.Button(bar, "", "ghost")
+    button:SetHeight(28)
+    button:SetScript("OnClick", function(self)
+        if self.profTab == "guides" then
+            SG.UI.OpenProfessionGuides()
+        else
+            SG.UI.OpenProfessionRecipes(self.profId)
+        end
+    end)
+    buttons[index] = button
+    return button
+end
+
+function SG.UI.LayoutProfTabs(bar)
+    local entries = SG.UI.ProfEntries()
+    local buttons = SG.UI.profTabButtons or {}
+    local width = bar:GetWidth()
+    if not width or width < 80 then width = 520 end
+    local chosen
+    if SG.db and SG.db.profTab == "recipes" and SG.Recipes and SG.Recipes.Selected then
+        local guide = SG.Engine and SG.Engine.Get and SG.Engine.Get("prof-recipes")
+        chosen = SG.Recipes.Selected(guide)
+    end
+    local x, row = 0, 0
+    for i = 1, #entries do
+        local entry = entries[i]
+        local button = SG.UI.EnsureProfButton(bar, i)
+        button:SetLabel(entry.label)
+        button.profTab = entry.kind
+        button.profId = entry.id
+        local textW = 0
+        local label = button.label
+        if label and label.GetStringWidth then textW = label:GetStringWidth() or 0 end
+        if textW < 8 then textW = #entry.label * 7 end
+        local w = math.floor(textW + 28)
+        if w < 64 then w = 64 end
+        if x > 0 and (x + w) > width then
+            row = row + 1
+            x = 0
+        end
+        button:ClearAllPoints()
+        button:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -(row * 32))
+        button:SetSize(w, 28)
+        local selected = false
+        if entry.kind == "guides" then
+            selected = not SG.db or SG.db.profTab ~= "recipes"
+        elseif entry.id then
+            selected = SG.db and SG.db.profTab == "recipes" and entry.id == chosen
+        else
+            selected = SG.db and SG.db.profTab == "recipes"
+        end
+        button.kind = selected and "primary" or "ghost"
+        button:Show()
+        if button.Paint then button:Paint(false) end
+        x = x + w + 6
+    end
+    for i = #entries + 1, #buttons do
+        buttons[i]:Hide()
+    end
+    local rows = row + 1
+    bar:SetHeight(rows * 28 + (rows - 1) * 4)
+end
+
 function SG.UI.SyncProfBar()
     if SG.db and SG.db.category == "professions" and SG.state then
         if SG.state.tab == "prof-recipes" then
@@ -212,11 +298,17 @@ function SG.UI.SyncProfBar()
         end
     end
     local bar = SG.UI.profBar
-    local on = SG.db and SG.db.category == "professions" and true or false
+    local on = SG.db and SG.db.category == "professions" and bar and true or false
     if bar then
         if on then bar:Show() else bar:Hide() end
     end
-    local offset = on and -36 or 0
+    local barH = 28
+    if on then
+        SG.UI.LayoutProfTabs(bar)
+        barH = bar:GetHeight()
+        if not barH or barH < 28 then barH = 28 end
+    end
+    local offset = on and -(barH + 8) or 0
     if SG.UI.profOffset ~= offset and SG.UI.tabbar then
         SG.UI.profOffset = offset
         local tabbar = SG.UI.tabbar
@@ -231,13 +323,6 @@ function SG.UI.SyncProfBar()
             SG.UI.steps:SetPoint("BOTTOMRIGHT")
         end
     end
-    local buttons = SG.UI.profTabButtons or {}
-    local selected = (SG.db and SG.db.profTab) or "guides"
-    for i = 1, #buttons do
-        local button = buttons[i]
-        button.kind = (button.profTab == selected) and "primary" or "ghost"
-        if button.Paint then button:Paint(false) end
-    end
 end
 
 function SG.UI.BuildProfBar(center)
@@ -251,34 +336,7 @@ function SG.UI.BuildProfBar(center)
     end
     bar:SetFrameLevel(level)
     bar:Hide()
-    local tabs = {
-        { id = "guides", label = "Guides", width = 72 },
-        { id = "recipes", label = "Recipes", width = 80 },
-    }
-    local buttons = {}
-    local previous
-    for i = 1, #tabs do
-        local info = tabs[i]
-        local button = SG.Widgets.Button(bar, info.label, "ghost")
-        button.profTab = info.id
-        button:SetSize(info.width, 28)
-        if i == 1 then
-            button:SetPoint("LEFT", 0, 0)
-        else
-            button:SetPoint("LEFT", previous, "RIGHT", 6, 0)
-        end
-        button:SetScript("OnClick", function(self)
-            if self.profTab == "recipes" then
-                SG.UI.OpenProfessionRecipes()
-            else
-                SG.UI.OpenProfessionGuides()
-            end
-        end)
-        buttons[i] = button
-        previous = button
-    end
     SG.UI.profBar = bar
-    SG.UI.profTabButtons = buttons
 end
 
 function SG.UI.Create()
@@ -1621,7 +1679,7 @@ function SG.UI.RefreshDetail()
         elseif step.optional then
             detail.eyebrow:SetText("OPTIONAL")
         else
-            detail.eyebrow:SetText(guide.title)
+            detail.eyebrow:SetText((guide.recipes and step.profName) or guide.title)
         end
         detail.title:SetText(step.title)
         if guide.scoreText and guide.scoreText ~= "" then

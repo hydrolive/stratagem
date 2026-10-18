@@ -796,6 +796,26 @@ local function NameRank()
     return rank
 end
 
+-- Client profession name to the skill line. The same walk ProfessionIds uses.
+local function ProfessionNames()
+    local names, seen = {}, {}
+    if not GetProfessions or not GetProfessionInfo then return names end
+    local function add(index)
+        if not index then return end
+        local name, _, _, _, _, _, skillLine = GetProfessionInfo(index)
+        if type(skillLine) ~= "number" or skillLine <= 0 or seen[skillLine] then return end
+        seen[skillLine] = true
+        if type(name) == "string" and name ~= "" then names[name] = skillLine end
+    end
+    local first, second, arch, fish, cook = GetProfessions()
+    add(first)
+    add(second)
+    add(arch)
+    add(fish)
+    add(cook)
+    return names
+end
+
 local function FactionCode(faction)
     if type(faction) ~= "table" then return "B" end
     if faction.side == "Alliance" then return "A" end
@@ -958,6 +978,7 @@ local function RecipeBook(data, profs)
 end
 
 local function AddReputation(found, n, rows, book, ranks)
+    local names = ProfessionNames()
     for i = 1, #rows do
         local row = rows[i]
         local known = book[row.itemID]
@@ -970,6 +991,7 @@ local function AddReputation(found, n, rows, book, ranks)
         local standing = StandingLabel(row.standing) or ("standing " .. row.standing)
         local line = standing
         if row.vendor then line = standing .. " · " .. row.vendor end
+        local profId = names[row.prof]
         n = n + 1
         found[#found + 1] = {
             rank = ranks[row.prof] or 50,
@@ -984,8 +1006,10 @@ local function AddReputation(found, n, rows, book, ranks)
                 optional = false,
                 match = "bis",
                 visible = true,
-                segment = row.prof .. " - " .. row.faction .. " - Vendor",
+                segment = row.faction .. " - Vendor",
                 zone = row.prof,
+                profId = profId,
+                profName = row.prof,
                 level = skill > 0 and skill or 1,
                 title = ItemLabel(row.itemID) or SpellLabel(spell) or "Recipe",
                 text = text,
@@ -1010,13 +1034,12 @@ local function SpotsFor(recipe, side)
     return nil
 end
 
-local function Segment(profName, tag, place)
-    local head = profName .. " - " .. tag
-    if type(place) == "string" and place ~= "" then return head .. " - " .. place end
-    return head
+local function Segment(tag, place)
+    if type(place) == "string" and place ~= "" then return tag .. " - " .. place end
+    return tag
 end
 
-local function MakeStep(recipe, spot, profName)
+local function MakeStep(recipe, spot, profName, profId)
     local recipeId = recipe.recipe
     local name = ItemLabel(recipeId) or SpellLabel(recipe.spell) or "Recipe"
     local skill = type(recipe.skill) == "number" and recipe.skill or 0
@@ -1028,8 +1051,10 @@ local function MakeStep(recipe, spot, profName)
         optional = false,
         match = "bis",
         visible = true,
-        segment = Segment(profName, spot.tag, spot.place),
+        segment = Segment(spot.tag, spot.place),
         zone = profName,
+        profId = profId,
+        profName = profName,
         level = skill > 0 and skill or 1,
         title = name,
         text = text,
@@ -1092,7 +1117,7 @@ local function Fill(steps, note, guide, data, profs, side)
                             skill = skill,
                             spell = recipe.spell,
                             index = n,
-                            step = MakeStep(recipe, spot, profName),
+                            step = MakeStep(recipe, spot, profName, profId),
                         }
                     end
                 end
@@ -1124,7 +1149,7 @@ function SG.Recipes.Build()
         category = "professions",
         side = "B",
         place = "Professions",
-        blurb = "Recipes a vendor sells, a quest rewards, that drop in the world, or that a reputation quartermaster sells, for a profession this character has. Grouped by profession, then vendors, quests, or world drops, then the zone or instance. A reputation recipe is grouped as the profession, the faction, and Vendor. It names the quartermaster, the zone, the map point, and the standing when the journal has them. A world drop names the mob, where that mob stands when Forever Guide stored a point, and the percent when its item search has them. That percent is the classic chance Forever Guide ships, not a Forever Wowhead rate. A sighting with no percent says so. A dungeon names its entrance when that point is stored. A bind-on-equip drop adds Auctionator's last scanned auction price when that addon has one. Trainer recipes stay at the trainer. A learned recipe is marked done and leaves the list. This does not level the profession for you.",
+        blurb = "Recipes a vendor sells, a quest rewards, that drop in the world, or that a reputation quartermaster sells, for a profession this character has. Each profession is its own tab. On that tab the lines are grouped by vendors, quests, or world drops, then the zone or instance. A reputation recipe is grouped as the faction and Vendor. It names the quartermaster, the zone, the map point, and the standing when the journal has them. A world drop names the mob, where that mob stands when Forever Guide stored a point, and the percent when its item search has them. That percent is the classic chance Forever Guide ships, not a Forever Wowhead rate. A sighting with no percent says so. A dungeon names its entrance when that point is stored. A bind-on-equip drop adds Auctionator's last scanned auction price when that addon has one. Trainer recipes stay at the trainer. A learned recipe is marked done and leaves the list. This does not level the profession for you.",
         min = 1,
         max = 60,
         steps = {},
@@ -1175,8 +1200,36 @@ function SG.Recipes.Build()
     return guide
 end
 
+function SG.Recipes.Tabs(guide)
+    local tabs, seen = {}, {}
+    if not guide or not guide.steps then return tabs end
+    for i = 1, #guide.steps do
+        local step = guide.steps[i]
+        local id = step.profId
+        if type(id) == "number" and id > 0 and not seen[id] then
+            seen[id] = true
+            local name = step.profName
+            if type(name) ~= "string" or name == "" then name = "Profession" end
+            tabs[#tabs + 1] = { id = id, name = name }
+        end
+    end
+    return tabs
+end
+
+function SG.Recipes.Selected(guide)
+    local tabs = SG.Recipes.Tabs(guide)
+    if #tabs == 0 then return nil end
+    local want = SG.db and SG.db.recipeProf
+    for i = 1, #tabs do
+        if tabs[i].id == want then return want end
+    end
+    return tabs[1].id
+end
+
 function SG.Recipes.Apply(guide)
     if not guide or not guide.recipes or not guide.steps then return end
+    local chosen = SG.Recipes.Selected(guide)
+    if SG.db and chosen and SG.db.recipeProf ~= chosen then SG.db.recipeProf = chosen end
     local row
     if SG.Engine and SG.Engine.Progress then row = SG.Engine.Progress(guide.id) end
     local any = false
@@ -1205,7 +1258,8 @@ function SG.Recipes.Apply(guide)
                     step.dropLine = step.baseLine ~= "" and step.baseLine or nil
                 end
             end
-            if closed then
+            local onTab = (not chosen) or step.profId == chosen
+            if closed or not onTab then
                 step.visible = false
             else
                 step.visible = true
