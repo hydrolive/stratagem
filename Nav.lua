@@ -20,6 +20,83 @@ function SG.Nav.ClearTomTom()
     end
 end
 
+-- Drops the marker Set waypoint placed. A pin the player dropped on their
+-- own is left alone.
+function SG.Nav.ClearMapPin()
+    local openMap = SG.Nav.openMap
+    local userPin = SG.Nav.userPin
+    SG.Nav.openMap = nil
+    SG.Nav.userPin = nil
+    if openMap then
+        local ns = _G.OpenMap
+        if type(ns) == "table" and ns.GetModule then
+            local ok, mod = pcall(ns.GetModule, ns, "worldmap")
+            if ok and type(mod) == "table" and mod.ClearPin then
+                pcall(mod.ClearPin)
+                return
+            end
+        end
+    end
+    if userPin and C_Map and C_Map.ClearUserWaypoint then
+        pcall(C_Map.ClearUserWaypoint)
+    end
+end
+
+local function WayTitle(step)
+    return "Stratagem: " .. (step.title or "Step")
+end
+
+-- OpenMap draws this on its map. Coordinates here are 0-1. TrackPoint also
+-- sets the Blizzard user waypoint when that map allows one.
+local function MarkOpenMap(step, title)
+    local ns = _G.OpenMap
+    if type(ns) ~= "table" or not ns.GetModule then return false end
+    local ok, mod = pcall(ns.GetModule, ns, "worldmap")
+    if not ok or type(mod) ~= "table" or type(mod.TrackPoint) ~= "function" then
+        return false
+    end
+    local ran = pcall(mod.TrackPoint, step.map, step.x / 100, step.y / 100, title)
+    if not ran then return false end
+    SG.Nav.openMap = true
+    SG.Nav.userPin = nil
+    return true
+end
+
+local function PlaceUserPin(step)
+    if not (C_Map and C_Map.SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates) then
+        return
+    end
+    if C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(step.map) then
+        return
+    end
+    local point = UiMapPoint.CreateFromCoordinates(step.map, step.x / 100, step.y / 100)
+    local ok = pcall(C_Map.SetUserWaypoint, point)
+    if not ok then return end
+    SG.Nav.userPin = true
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+        pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true)
+    end
+end
+
+-- OpenMap's TrackPoint also drops a TomTom pin. When the TomTom option is
+-- off, remove only the pin this call just added.
+local function DropOpenMapTomTom(mapID, title)
+    if type(TomTom) ~= "table" or type(TomTom.waypoints) ~= "table" or not TomTom.RemoveWaypoint then
+        return
+    end
+    local list = TomTom.waypoints[mapID]
+    if type(list) ~= "table" then return end
+    local drop = {}
+    for _, uid in pairs(list) do
+        if type(uid) == "table" and uid.from == "OpenMap" and uid.title == title then
+            drop[#drop + 1] = uid
+        end
+    end
+    for i = 1, #drop do
+        pcall(TomTom.RemoveWaypoint, TomTom, drop[i])
+    end
+end
+
 function SG.Nav.SuperTrack(questID)
     if not SG.db.options.superTrack or not questID then return end
     if C_QuestLog and C_QuestLog.AddQuestWatch then
@@ -46,6 +123,7 @@ function SG.Nav.Set(step)
     SG.Nav.step = step
     if not step then
         SG.Nav.ClearTomTom()
+        SG.Nav.ClearMapPin()
         if SG.Arrow then SG.Arrow.Tick() end
         return
     end
@@ -55,13 +133,26 @@ function SG.Nav.Set(step)
     end
     SG.Nav.SuperTrack(track)
     SG.Nav.ClearTomTom()
+    local title = WayTitle(step)
+    local marked = false
+    if step.map and step.x and step.y then
+        marked = MarkOpenMap(step, title)
+        if marked then
+            if not TomTomOn() then DropOpenMapTomTom(step.map, title) end
+        else
+            SG.Nav.ClearMapPin()
+            PlaceUserPin(step)
+        end
+    else
+        SG.Nav.ClearMapPin()
+    end
     if TomTomOn() and step.map and step.x and step.y then
         local ok, uid = pcall(TomTom.AddWaypoint, TomTom, step.map, step.x / 100, step.y / 100, {
-            title = "Stratagem: " .. (step.title or "Step"),
+            title = title,
             persistent = false,
             minimap = true,
             world = true,
-            from = "Stratagem",
+            from = marked and "OpenMap" or "Stratagem",
         })
         if ok then SG.Nav.uid = uid end
     end

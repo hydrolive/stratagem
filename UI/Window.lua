@@ -1281,6 +1281,7 @@ function SG.UI.FillStepRow(row, step, width, guide)
         bits[#bits + 1] = "Starting zone"
     end
     if step.gearName then bits[#bits + 1] = step.gearName end
+    if step.giverName and step.giverName ~= "" then bits[#bits + 1] = step.giverName end
     if step.dropLine then bits[#bits + 1] = step.dropLine end
     if step.placeName and step.placeName ~= "" then bits[#bits + 1] = step.placeName end
     if step.x and step.y then
@@ -1348,6 +1349,7 @@ function SG.UI.RefreshSteps(resetScroll)
         if step.dropLine and step.dropLine:lower():find(query, 1, true) then return true end
         if step.gearName and step.gearName:lower():find(query, 1, true) then return true end
         if step.placeName and step.placeName:lower():find(query, 1, true) then return true end
+        if step.giverName and step.giverName:lower():find(query, 1, true) then return true end
         if step.rewards and SG.ItemName then
             for n = 1, #step.rewards do
                 local name = SG.ItemName(step.rewards[n], true)

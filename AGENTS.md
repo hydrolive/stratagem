@@ -1,6 +1,6 @@
 # Stratagem agent rules
 
-Stratagem is a WoW Forever addon. The client is `D:\WoW\World of Warcraft\_classic_beta_`. NaowhForever_BiS on that client uses interface **16001**. That number stays first in `Stratagem.toc`. The other interface numbers are only the ones TomTom already lists, so a Forever build that advertises one of them still loads. Do not aim this addon at retail or at a different classic client.
+Stratagem is a WoW Forever addon. The client is `D:\WoW\World of Warcraft\_forever_`. NaowhForever_BiS on that client uses interface **16001**. That number stays first in `Stratagem.toc`. The other interface numbers are only the ones TomTom already lists, so a Forever build that advertises one of them still loads. Do not aim this addon at retail or at a different classic client.
 
 ## After every prompt
 
@@ -11,7 +11,7 @@ When a prompt changes the addon, its data, or these instructions, finish in this
 3. Update the workspace memory topic `topics/stratagem.md` under the Stratagem workspace scope. Do not edit `MEMORY.md`. Record stable facts only: client path, deploy path, data source, and catalog limits.
 4. Commit the repository. One commit for the completed prompt.
 5. Push that commit to `origin` `main` (`https://github.com/hydrolive/stratagem.git`). Do not force-push.
-6. Copy the addon to `D:\WoW\World of Warcraft\_classic_beta_\Interface\AddOns\Stratagem`. Exclude `.git`.
+6. Copy the addon to `D:\WoW\World of Warcraft\_forever_\Interface\AddOns\Stratagem`. Exclude `.git`.
 7. Tell the user what changed and how to test it on WoW Forever.
 
 Skip the copy only when the prompt did not change anything the client loads or the docs that describe it. Still update the spec and memory if the contract changed.
@@ -29,7 +29,7 @@ Skip the copy only when the prompt did not change anything the client loads or t
 ## Deploy
 
 ```powershell
-robocopy E:\Github\stratagem "D:\WoW\World of Warcraft\_classic_beta_\Interface\AddOns\Stratagem" /E /XD .git
+robocopy E:\Github\stratagem "D:\WoW\World of Warcraft\_forever_\Interface\AddOns\Stratagem" /E /XD .git
 ```
 
 Robocopy codes 0 through 7 mean the copy worked.

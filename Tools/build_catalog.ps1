@@ -4,10 +4,10 @@
 # Data\ItemSpecs.lua.
 #
 #   powershell -File Tools\build_catalog.ps1
-#   powershell -File Tools\build_catalog.ps1 -Source "D:\WoW\World of Warcraft\_classic_beta_\Interface\AddOns"
+#   powershell -File Tools\build_catalog.ps1 -Source "D:\WoW\World of Warcraft\_forever_\Interface\AddOns"
 
 param(
-    [string]$Source = "D:\WoW\World of Warcraft\_classic_beta_\Interface\AddOns"
+    [string]$Source = "D:\WoW\World of Warcraft\_forever_\Interface\AddOns"
 )
 
 $ErrorActionPreference = "Stop"

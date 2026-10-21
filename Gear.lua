@@ -804,7 +804,7 @@ end
 local AHEAD = 3
 local SOURCE_SEP = " \194\183 "
 
-local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward that is an upgrade lists the earlier quests in that chain under one Chain header. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
+local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward that is an upgrade lists the earlier quests in that chain under one Chain header. A quest line names the zone, the quest giver, and where to find them when a loaded list has that. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
 
 local function Namespace()
     return SG.BiS and SG.BiS.ns or nil
@@ -880,6 +880,179 @@ local function ZoneName(quest, where)
         if zone and zone ~= "" then return zone end
     end
     return "Quests"
+end
+
+local function MapTitle(map)
+    if type(map) ~= "number" or not C_Map or not C_Map.GetMapInfo then return nil end
+    local info = C_Map.GetMapInfo(map)
+    if type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
+        return info.name
+    end
+    return nil
+end
+
+-- A catalog line is "Zone - Name (x, y)". A journal paragraph is not a name.
+local function PersonName(where)
+    if type(where) ~= "string" or where == "" then return nil end
+    if where:find("not known", 1, true) then return nil end
+    local giver = SG.Engine and SG.Engine.Giver and SG.Engine.Giver(where) or nil
+    if type(giver) ~= "string" or giver == "" then return nil end
+    if #giver > 48 then return nil end
+    if giver:find(";", 1, true) or giver:find("quest", 1, true) then return nil end
+    if giver:find(".", 1, true) then return nil end
+    return giver
+end
+
+local function ShortZone(quest, where)
+    local zone = ZoneName(quest, where)
+    if zone == "Quests" then return nil end
+    local dash = zone:find(" - ", 1, true)
+    if dash and dash > 1 then
+        zone = zone:sub(1, dash - 1)
+        if strtrim then zone = strtrim(zone) end
+    end
+    if zone == "" or #zone > 40 then return nil end
+    if zone:find(".", 1, true) or zone:find(";", 1, true) then return nil end
+    return zone
+end
+
+local function ChainStart(questID)
+    local ns = Namespace()
+    local journal = ns and ns.Journal
+    local start = journal and journal.QuestChainStarts and journal.QuestChainStarts[questID]
+    if type(start) ~= "table" then return nil end
+    local map, x, y, who = start[1], start[2], start[3], start[4]
+    if type(map) ~= "number" then map = nil end
+    if type(x) ~= "number" or type(y) ~= "number" then
+        x, y = nil, nil
+    end
+    if type(who) ~= "string" or who == "" then who = nil end
+    return map, x, y, who
+end
+
+local function LoadAreaMap(value)
+    if type(value) == "table" then return value end
+    if type(value) ~= "string" or value == "" or not loadstring then return nil end
+    local fn = loadstring(value)
+    if type(fn) ~= "function" then return nil end
+    local ran, parsed = pcall(fn)
+    if ran and type(parsed) == "table" then return parsed end
+    return nil
+end
+
+local function UiMapFor(area)
+    if type(area) ~= "number" then return nil end
+    local cache = SG.Gear.areaMaps
+    if cache == nil then
+        cache = false
+        local lib = _G.LibQuestieDB
+        local support = lib and lib.Support
+        local get = support and support.Get
+        if get then
+            local ok, zone = pcall(get, "ZoneDB")
+            local private = ok and type(zone) == "table" and zone.private or nil
+            if type(private) == "table" then
+                local base = LoadAreaMap(private.areaIdToUiMapId)
+                local over = LoadAreaMap(private.areaIdToUiMapIdOverride)
+                if type(base) == "table" or type(over) == "table" then
+                    cache = { base = base, over = over }
+                end
+            end
+        end
+        SG.Gear.areaMaps = cache
+    end
+    if type(cache) ~= "table" then return nil end
+    local id = cache.over and cache.over[area]
+    if type(id) ~= "number" then id = cache.base and cache.base[area] end
+    if type(id) ~= "number" or id <= 0 then return nil end
+    return id
+end
+
+local function FirstSpot(list, area)
+    if type(list) ~= "table" then return nil end
+    local function take(key, spots)
+        if type(key) ~= "number" or type(spots) ~= "table" then return nil end
+        local spot = spots[1]
+        if type(spot) ~= "table" then return nil end
+        local x, y = spot[1], spot[2]
+        if type(x) ~= "number" or type(y) ~= "number" then return nil end
+        if x < 0 or x > 100 or y < 0 or y > 100 then return nil end
+        return key, x, y
+    end
+    local got, x, y = take(area, type(area) == "number" and list[area] or nil)
+    if x then return got, x, y end
+    for key, spots in pairs(list) do
+        got, x, y = take(key, spots)
+        if x then return got, x, y end
+    end
+    return nil
+end
+
+-- One Questie starter. db is NpcDB or ObjectDB. The ui map comes from ZoneDB.
+local function StarterAt(db, id)
+    if type(db) ~= "table" or type(id) ~= "number" or not db.name then return nil end
+    local named, who = pcall(db.name, id)
+    if not named or type(who) ~= "string" or who == "" then who = nil end
+    local map, x, y, zone
+    if db.spawns then
+        local spawned, list = pcall(db.spawns, id)
+        if spawned and type(list) == "table" then
+            local areaID
+            if db.zoneID then
+                local zoneOk, zoneValue = pcall(db.zoneID, id)
+                if zoneOk and type(zoneValue) == "number" then areaID = zoneValue end
+            end
+            local got, sx, sy = FirstSpot(list, areaID)
+            if sx then
+                x, y = sx, sy
+                map = UiMapFor(got)
+                zone = MapTitle(map)
+            end
+        end
+    end
+    if not who and not x then return nil end
+    return who, map, x, y, zone
+end
+
+-- Questie names the starter and one spawn. Used only when the catalog and
+-- the journal start do not already name that part.
+local function FirstNpc(questID)
+    local QuestDB = _G.QuestDB
+    if not QuestDB or not QuestDB.startedBy then return nil end
+    local ok, started = pcall(QuestDB.startedBy, questID)
+    if not ok or type(started) ~= "table" then return nil end
+    local groups = { started[1], started[2] }
+    local dbs = { _G.NpcDB, _G.ObjectDB }
+    for i = 1, 2 do
+        local ids = groups[i]
+        local id = type(ids) == "table" and ids[1] or nil
+        if type(id) == "number" then
+            local who, map, x, y, zone = StarterAt(dbs[i], id)
+            if who or x then return who, map, x, y, zone end
+        end
+    end
+    return nil
+end
+
+local function PickupSentence(name, zone, giver, x, y)
+    local bits = {}
+    bits[#bits + 1] = "Get " .. (name or "this quest") .. "."
+    if type(zone) == "string" and zone ~= "" and zone ~= "Quests" then
+        bits[#bits + 1] = "Zone: " .. zone .. "."
+    else
+        bits[#bits + 1] = "The list does not name the zone."
+    end
+    if type(giver) == "string" and giver ~= "" then
+        bits[#bits + 1] = "Quest giver: " .. giver .. "."
+    else
+        bits[#bits + 1] = "The list does not name the quest giver."
+    end
+    if type(x) == "number" and type(y) == "number" then
+        bits[#bits + 1] = string.format("Find them at %.1f, %.1f.", x, y)
+    else
+        bits[#bits + 1] = "The list does not name where to find them."
+    end
+    return table.concat(bits, " ")
 end
 
 local function DungeonBand(name)
@@ -1023,9 +1196,10 @@ end
 local function QuestPlace(questID)
     local name, quest = QuestTitle(questID)
     local level = QuestLevel(questID)
-    local map, x, y, where
+    local map, x, y, where, zone
     if quest then
         map, x, y, where = quest.map, quest.x, quest.y, quest.where
+        zone = ShortZone(quest, where)
     end
     if SG.Route and SG.Route.StartOf then
         local smap, sx, sy, swhere = SG.Route.StartOf(questID)
@@ -1036,11 +1210,28 @@ local function QuestPlace(questID)
             if type(where) ~= "string" or where == "" then where = swhere end
         end
     end
-    local zone = ZoneName(quest, where)
-    local giver = SG.Engine and SG.Engine.Giver and SG.Engine.Giver(where) or nil
-    local from = (giver and giver ~= "") and (" from " .. giver) or ""
-    local inZone = (zone ~= "Quests") and (" in " .. zone) or ""
-    return name, level, map, x, y, zone, from, inZone
+    local giver = PersonName(where)
+    local cmap, cx, cy, cwho = ChainStart(questID)
+    if not giver and cwho then giver = cwho end
+    if not (map and x and y) and cmap and cx and cy then
+        map, x, y = cmap, cx, cy
+    end
+    if not zone then zone = ShortZone(quest, where) end
+    if not zone then zone = MapTitle(map) end
+    if not giver or not (map and x and y) or not zone then
+        local qwho, qmap, qx, qy, qzone = FirstNpc(questID)
+        if not giver and qwho then giver = qwho end
+        if not (map and x and y) and qmap and qx and qy then
+            map, x, y = qmap, qx, qy
+        end
+        if not zone and qzone then zone = qzone end
+    end
+    if not zone then zone = MapTitle(map) end
+    if not (map and x and y) then
+        map, x, y = nil, nil, nil
+    end
+    local sentence = PickupSentence(name, zone, giver, x, y)
+    return name, level, map, x, y, zone, giver, sentence
 end
 
 local function CopyNames(list)
@@ -1076,7 +1267,7 @@ local function ExpandChains(raw, gearQuests, side, class)
                     local entry = flat[n]
                     local qid = entry and entry.id
                     if qid and qid ~= root and not used[qid] and QuestAllowed(qid, side, class) then
-                        local name, level, map, x, y, zone, from, inZone = QuestPlace(qid)
+                        local name, level, map, x, y, zone, giver, sentence = QuestPlace(qid)
                         if name then
                             used[qid] = true
                             group[#group + 1] = {
@@ -1088,8 +1279,8 @@ local function ExpandChains(raw, gearQuests, side, class)
                                 x = x,
                                 y = y,
                                 zone = zone,
-                                from = from,
-                                inZone = inZone,
+                                giver = giver,
+                                sentence = sentence,
                             }
                         end
                     end
@@ -1109,19 +1300,20 @@ local function ExpandChains(raw, gearQuests, side, class)
                         lead.chainGroup = root
                         if row.alt then lead.chainAlt = true end
                         lead.chainPos = g
-                        lead.map, lead.x, lead.y = row.map, row.x, row.y
-                        if row.zone ~= "Quests" then lead.placeName = row.zone end
+                        if type(row.map) == "number" and type(row.x) == "number" and type(row.y) == "number" then
+                            lead.map, lead.x, lead.y = row.map, row.x, row.y
+                        end
+                        if type(row.zone) == "string" and row.zone ~= "" and row.zone ~= "Quests" then
+                            lead.placeName = row.zone
+                        end
+                        lead.giverName = row.giver
                         lead.segment = header
                         lead.zone = header
                         lead.title = row.name
-                        local alt = ""
+                        lead.baseText = (row.sentence or "") .. " This leads to " .. rewardName .. "."
                         if row.alt then
-                            alt = " The chain lists this beside other quests. Complete one."
+                            lead.baseText = lead.baseText .. " The chain lists this beside other quests. Complete one."
                         end
-                        lead.baseText = string.format(
-                            "Pick up %s%s%s. This leads to %s.%s",
-                            row.name, row.from, row.inZone, rewardName, alt
-                        )
                         lead.text = lead.baseText
                         if g > 1 then lead.chainPrior = CopyNames(prior) end
                         prior[#prior + 1] = row.name
@@ -1211,7 +1403,6 @@ function SG.Gear.Build(side)
     local seenQuest = {}
     for questID, items in pairs(SG.Gear.byQuest) do
         if not seenQuest[questID] and QuestAllowed(questID, side, class) then
-            local name, quest = QuestTitle(questID)
             local rewards = {}
             for i = 1, #items do
                 local fact = SG.Gear.Fact(items[i])
@@ -1219,41 +1410,29 @@ function SG.Gear.Build(side)
                     rewards[#rewards + 1] = items[i]
                 end
             end
+            local name, level, map, x, y, zone, giver, sentence = QuestPlace(questID)
             if name and #rewards > 0 then
                 seenQuest[questID] = true
                 for i = 1, #rewards do questItems[rewards[i]] = true end
-                local map, x, y, where
-                if quest then
-                    map, x, y, where = quest.map, quest.x, quest.y, quest.where
-                end
-                if SG.Route and SG.Route.StartOf then
-                    local smap, sx, sy, swhere = SG.Route.StartOf(questID)
-                    if not (map and x and y) and smap and sx and sy then
-                        map, x, y = smap, sx, sy
-                    end
-                    if type(swhere) == "string" and swhere ~= "" then
-                        if type(where) ~= "string" or where == "" then where = swhere end
-                    end
-                end
-                local zone = ZoneName(quest, where)
-                local giver = SG.Engine and SG.Engine.Giver and SG.Engine.Giver(where) or nil
-                local from = (giver and giver ~= "") and (" from " .. giver) or ""
-                local inZone = (zone ~= "Quests") and (" in " .. zone) or ""
+                local place = (type(zone) == "string" and zone ~= "" and zone ~= "Quests") and zone or nil
                 local step = BlankStep()
                 step.sourceKind = "quest"
                 step.questID = questID
                 step.questName = name
-                step.level = QuestLevel(questID)
-                step.segment = zone
-                step.zone = zone
-                step.placeName = zone ~= "Quests" and zone or nil
-                step.map, step.x, step.y = map, x, y
+                step.level = level
+                step.segment = place or "Quests"
+                step.zone = step.segment
+                step.placeName = place
+                step.giverName = giver
+                if type(map) == "number" and type(x) == "number" and type(y) == "number" then
+                    step.map, step.x, step.y = map, x, y
+                end
                 step.allRewards = rewards
                 step.rewards = rewards
                 step.gearItem = rewards[1]
                 step.itemID = rewards[1]
-                step.baseText = string.format("Pick up %s%s%s.", name, from, inZone)
-                step.text = step.baseText
+                step.baseText = sentence
+                step.text = sentence
                 step.title = "(Optional) " .. name
                 raw[#raw + 1] = step
             end
