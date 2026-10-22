@@ -800,11 +800,13 @@ function SG.Gear.Start()
     SG.After(0, chunk)
 end
 
--- How far ahead of the character a pickup still shows. Past that, it waits.
+-- Other tabs stay within a few levels. Quests list the next zones, then stop.
+-- Past that window, the line stays hidden.
 local AHEAD = 3
+local QUEST_AHEAD = 20
 local SOURCE_SEP = " \194\183 "
 
-local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts only when that piece has stats for this spec. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward that is an upgrade lists the earlier quests under their zone. Each of those lines names the item the later quest gives. A quest line names the zone, the quest giver, and where to find them when a loaded list has that. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
+local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. Quest lines are spec upgrades through the next zones, ordered by level. A quest piece you have outgrown, already own, or have turned in stays listed and marked Done. A cached piece with no spec stats stays off. The other tabs show a line only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts only when that piece has stats for this spec. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward with stats for this spec lists the earlier quests under their zone, including one you have outgrown. Each of those lines names the item the later quest gives. A quest line names the zone, the quest giver, and where to find them when a loaded list has that. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
 
 local function Namespace()
     return SG.BiS and SG.BiS.ns or nil
@@ -2193,14 +2195,17 @@ end
 local function Survey(step, class, playerLevel, held, tab, profs)
     local ids = IdsOf(step)
     local result = { anyBetter = false, wearable = false, ownedOpen = false, pending = false, now = {} }
-    local soon = (step.level or 1) <= playerLevel + AHEAD
+    local questLine = step.sourceKind == "quest"
+    local cap = AHEAD
+    if questLine then cap = QUEST_AHEAD end
+    local soon = (step.level or 1) <= playerLevel + cap
     local better, ownedBetter = 0, 0
     local counts = held and held.count or {}
     local slots = held and held.bySlot or {}
     for i = 1, #ids do
         local fact = SG.Gear.Fact(ids[i])
         local wear = fact and WearLevel(class, fact) or nil
-        local reach = soon and wear and wear <= playerLevel + AHEAD
+        local reach = soon and wear and (questLine or wear <= playerLevel + AHEAD)
         local ask = reach and MaybeThisTab(step, tab, profs)
         local seen = fact and SG.Gear.loads and SG.Gear.loads[fact.itemID]
         -- Other tabs are scored only after this addon has already asked for them.
@@ -2228,40 +2233,47 @@ local function Survey(step, class, playerLevel, held, tab, profs)
                         slot = fact.slot, score = cand.score, armor = cand.armor, ilvl = fact.ilvl,
                     }
                 end
+                local owned = counts[fact.itemID] or 0
+                local wearableCopies = 0
+                local list = slots[fact.slot]
+                if list then
+                    for n = 1, #list do
+                        if list[n].itemID == fact.itemID then
+                            wearableCopies = wearableCopies + 1
+                        end
+                    end
+                end
+                local need = (fact.slot == 11 or fact.slot == 13) and 2 or 1
+                -- A copy you cannot wear yet still means you already have the item.
+                -- Wearable copies fill a slot only when both ring or trinket slots are covered.
+                local filled = owned > wearableCopies or wearableCopies >= need
                 if beats then
                     result.anyBetter = true
                     better = better + 1
-                    local owned = counts[fact.itemID] or 0
-                    local wearableCopies = 0
-                    local list = slots[fact.slot]
-                    if list then
-                        for n = 1, #list do
-                            if list[n].itemID == fact.itemID then
-                                wearableCopies = wearableCopies + 1
-                            end
-                        end
-                    end
-                    local need = (fact.slot == 11 or fact.slot == 13) and 2 or 1
-                    -- A copy you cannot wear yet still means you already have the item.
-                    -- Wearable copies fill a slot only when both ring or trinket slots are covered.
-                    local filled = owned > wearableCopies or wearableCopies >= need
                     if filled then
                         ownedBetter = ownedBetter + 1
                     end
-                    if not filled then
-                        local pick = {
-                            fact = fact,
-                            itemID = fact.itemID,
-                            worn = bar and bar.ilvl or 0,
-                            wornName = bar and bar.name or nil,
-                            score = cand.score,
-                            armor = cand.armor,
-                            ilvl = fact.ilvl,
-                            now = now and true or false,
-                            empty = not bar,
-                            pair = (fact.slot == 11 or fact.slot == 13) and true or false,
-                        }
+                end
+                local relevant = questLine and beats ~= nil and (cand.score or 0) > 0
+                local take = (beats and not filled) or (relevant and (not beats or filled))
+                if take then
+                    local pick = {
+                        fact = fact,
+                        itemID = fact.itemID,
+                        worn = bar and bar.ilvl or 0,
+                        wornName = bar and bar.name or nil,
+                        score = cand.score,
+                        armor = cand.armor,
+                        ilvl = fact.ilvl,
+                        now = now and true or false,
+                        empty = not bar,
+                        pair = (fact.slot == 11 or fact.slot == 13) and true or false,
+                        owned = filled and true or false,
+                    }
+                    if beats and not filled then
                         if PreferPick(result.pick, pick) then result.pick = pick end
+                    elseif PreferPick(result.kept, pick) then
+                        result.kept = pick
                     end
                 end
             elseif ask and not failed then
@@ -2333,30 +2345,47 @@ local function WritePick(step, pick, playerLevel)
             name, who, standing, faction, cost, equip, why)
     else
         step.title = "(Optional) " .. (step.questName or "Quest") .. ": " .. name
-        local kind = pick.bis and "Level BiS" or "Upgrade"
-        local because
-        if pick.empty then
-            because = pick.pair and "one of those slots is still empty" or "that slot is empty"
-        elseif pick.wornName and pick.wornName ~= "" then
-            because = "replaces " .. pick.wornName
+        if pick.past then
+            step.bisFrom = nil
+            local note = "You already have a better piece for this spec."
+            if pick.owned then
+                note = "You already have this."
+            elseif pick.turned then
+                note = "This quest is already turned in."
+            end
+            local base = step.baseText or ""
+            if base ~= "" then
+                step.text = base .. " " .. note
+            else
+                step.text = note
+            end
         else
-            because = "better for this spec than what you already have"
+            local kind = pick.bis and "Level BiS" or "Upgrade"
+            local because
+            if pick.empty then
+                because = pick.pair and "one of those slots is still empty" or "that slot is empty"
+            elseif pick.wornName and pick.wornName ~= "" then
+                because = "replaces " .. pick.wornName
+            else
+                because = "better for this spec than what you already have"
+            end
+            step.text = string.format("%s Take %s (%s). %s: %s.%s", step.baseText or "", name, slot:lower(), kind, because, equip)
         end
-        step.text = string.format("%s Take %s (%s). %s: %s.%s", step.baseText or "", name, slot:lower(), kind, because, equip)
     end
     step.baseText = step.baseText or step.text
     if step.sourceKind ~= "quest" then step.baseText = step.text end
     step.rewards = { pick.itemID }
 end
 
--- A chain lead stays hidden until that reward is an upgrade on this tab.
--- Turned-in leads stay listed and done. They do not set skip.
+-- A chain lead stays hidden until that reward is listed on this tab.
+-- An outgrown, owned, or turned-in reward still lists the earlier quests.
+-- A turned-in lead stays done and does not set skip, so it does not reopen.
 local function ApplyChains(guide, row)
     local rewardAt = {}
     local steps = guide.steps
     for i = 1, #steps do
         local step = steps[i]
-        if step.chainGroup and not step.chainLead and step.visible and step.gearState == "show" then
+        if step.chainGroup and not step.chainLead and step.visible and (step.gearState == "show" or step.gearState == "done") then
             rewardAt[step.chainGroup] = i
         end
     end
@@ -2380,11 +2409,17 @@ local function ApplyChains(guide, row)
                     step.text = step.baseText
                 end
             end
-            if TurnedIn(step.questID) then
+            local rewardPast = reward.gearState == "done"
+            local leadIn = TurnedIn(step.questID)
+            if rewardPast or leadIn then
                 step.gearState = "done"
                 if row and row.hold ~= i then
                     row.done[i] = true
-                    row.skip[i] = nil
+                    if leadIn then
+                        row.skip[i] = nil
+                    else
+                        row.skip[i] = true
+                    end
                 end
             else
                 step.gearState = "show"
@@ -2436,6 +2471,18 @@ function SG.Gear.Filter(guide)
             step.gearState = "wait"
             return
         end
+        -- Still on the list. Done because the quest is turned in, the piece is
+        -- owned, or a better piece is already equipped. skip lets a later show
+        -- reopen it. A manual Done click does not set skip, so that one stays.
+        if mode == "past" then
+            step.visible = true
+            step.gearState = "done"
+            if row and row.hold ~= i then
+                row.done[i] = true
+                row.skip[i] = true
+            end
+            return
+        end
         -- Turned in, but not on this tab. Stay done, and stay out of this bar.
         if mode == "keep" then
             step.visible = false
@@ -2473,7 +2520,7 @@ function SG.Gear.Filter(guide)
     for i = 1, #guide.steps do
         local step = guide.steps[i]
         if step.chainLead then
-            -- No item. Shown later only when the reward on this tab is an upgrade.
+            -- No item. Shown later when that reward is listed on this tab.
         elseif not step.gearNote and class then
             local info = Survey(step, class, playerLevel, ownedGear, tab, profs)
             surveyed[i] = info
@@ -2499,20 +2546,37 @@ function SG.Gear.Filter(guide)
         elseif not step.gearNote then
             local info = surveyed[i]
             local pick = info and info.pick
-            -- A turned-in quest cannot be picked up again, even when the
-            -- reward would still beat what you have.
-            if class and step.questID and TurnedIn(step.questID) then
-                AssignTab(step, profs)
-                if OnGearTab(step, tab) then
-                    mark(i, step, "done")
-                else
-                    mark(i, step, "keep")
-                end
-            elseif not class or not info then
+            local kept = info and info.kept
+            local questLine = step.sourceKind == "quest"
+            local turned = class and step.questID and TurnedIn(step.questID) and true or false
+            if not class or not info then
                 mark(i, step, "wait")
-            elseif info.pending and not pick then
+            elseif pick or (questLine and kept) then
+                if not AssignTab(step, profs) then
+                    mark(i, step, "wait")
+                elseif not OnGearTab(step, tab) then
+                    if turned then
+                        mark(i, step, "keep")
+                    else
+                        mark(i, step, "aside")
+                    end
+                elseif turned or not pick then
+                    local chosen = pick or kept
+                    chosen.past = true
+                    chosen.turned = turned
+                    WritePick(step, chosen, playerLevel)
+                    mark(i, step, "past")
+                    any = true
+                else
+                    local best = bestSpec[pick.fact.slot]
+                    pick.bis = pick.now and (not best or pick.score >= best.score)
+                    WritePick(step, pick, playerLevel)
+                    mark(i, step, "show")
+                    any = true
+                end
+            elseif info.pending then
                 if AssignTab(step, profs) and OnGearTab(step, tab) then
-                    if (step.level or 1) <= playerLevel + AHEAD then
+                    if questLine or (step.level or 1) <= playerLevel + AHEAD then
                         waiting = true
                     end
                     mark(i, step, "wait")
@@ -2521,17 +2585,12 @@ function SG.Gear.Filter(guide)
                 else
                     mark(i, step, "wait")
                 end
-            elseif pick then
-                if not AssignTab(step, profs) then
-                    mark(i, step, "wait")
-                elseif not OnGearTab(step, tab) then
-                    mark(i, step, "aside")
+            elseif turned then
+                AssignTab(step, profs)
+                if OnGearTab(step, tab) then
+                    mark(i, step, "done")
                 else
-                    local best = bestSpec[pick.fact.slot]
-                    pick.bis = pick.now and (not best or pick.score >= best.score)
-                    WritePick(step, pick, playerLevel)
-                    mark(i, step, "show")
-                    any = true
+                    mark(i, step, "keep")
                 end
             elseif info.ownedOpen or (info.wearable and not info.anyBetter) then
                 AssignTab(step, profs)
@@ -2563,8 +2622,12 @@ function SG.Gear.Filter(guide)
                 step.text = "Some items on this tab are still loading. The list updates when their stats arrive. Until then, a higher item level is not treated as an upgrade."
             else
                 step.title = "Nothing to upgrade"
-                local pattern = TAB_EMPTY[tab] or TAB_EMPTY.quest
-                step.text = string.format(pattern, AHEAD, specName)
+                if tab == "quest" then
+                    step.text = "No quest reward with stats for " .. specName .. " is on the list yet. A piece you have outgrown stays listed and marked Done."
+                else
+                    local pattern = TAB_EMPTY[tab] or TAB_EMPTY.quest
+                    step.text = string.format(pattern, AHEAD, specName)
+                end
             end
             step.baseText = step.text
             if row and row.hold ~= i then row.done[i] = nil end
@@ -2708,15 +2771,11 @@ local function StepOnIsle(step, cache)
 end
 
 -- Paint order only. Step indexes stay put so checkmarks do not clear.
--- The header is the zone. A chain stays in that zone, in the order it was written.
+-- The header is the zone. Groups follow the lowest step level, then the
+-- order they were written. A chain stays in that zone.
 function SG.Gear.DisplayOrder(guide)
     local steps = guide and guide.steps
     if not steps then return {} end
-    local hereMap, hereName, hereParent = SG.Gear.PlayerZone()
-    local cache = {}
-    local onIsle = hereMap == ISLE_MAP or hereParent == ISLE_MAP or SameZone(hereName, "Zephras Isle")
-    local race = SG.raceID
-    local pushIsle = (not onIsle) and (race == 2 or race == 6 or race == 8)
     local groups, keys = {}, {}
     for i = 1, #steps do
         local step = steps[i]
@@ -2724,19 +2783,18 @@ function SG.Gear.DisplayOrder(guide)
             local key = step.segment or ""
             local group = groups[key]
             if not group then
-                group = { first = i, rank = 2, indexes = {} }
+                group = { first = i, level = step.level or 1, indexes = {} }
                 groups[key] = group
                 keys[#keys + 1] = key
             end
             group.indexes[#group.indexes + 1] = i
-            local rank = SG.Gear.ZoneRank(step, hereMap, hereName, hereParent, cache)
-            if pushIsle and rank < 2 and StepOnIsle(step, cache) then rank = 2 end
-            if rank < group.rank then group.rank = rank end
+            local level = step.level or 1
+            if level < group.level then group.level = level end
         end
     end
     table.sort(keys, function(a, b)
         local ga, gb = groups[a], groups[b]
-        if ga.rank ~= gb.rank then return ga.rank < gb.rank end
+        if ga.level ~= gb.level then return ga.level < gb.level end
         return ga.first < gb.first
     end)
     local out = {}

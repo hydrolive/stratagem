@@ -1001,7 +1001,15 @@ local function Neighbor(guide, index, direction)
         if not at then
             if direction < 0 then at = #order + 1 else at = 0 end
         end
-        return order[at + direction]
+        local n = at + direction
+        while order[n] do
+            local step = guide.steps[order[n]]
+            if step and not step.gearNote and not SG.Engine.IsDone(guide, order[n]) then
+                return order[n]
+            end
+            n = n + direction
+        end
+        return nil
     end
     local i = index
     while true do
