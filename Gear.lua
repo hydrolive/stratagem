@@ -804,7 +804,7 @@ end
 local AHEAD = 3
 local SOURCE_SEP = " \194\183 "
 
-local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts only when that piece has stats for this spec. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward that is an upgrade lists the earlier quests in that chain under one Chain header. A quest line names the zone, the quest giver, and where to find them when a loaded list has that. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
+local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts only when that piece has stats for this spec. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward that is an upgrade lists the earlier quests under their zone. Each of those lines names the item the later quest gives. A quest line names the zone, the quest giver, and where to find them when a loaded list has that. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
 
 local function Namespace()
     return SG.BiS and SG.BiS.ns or nil
@@ -1287,8 +1287,14 @@ local function ExpandChains(raw, gearQuests, side, class)
                 end
                 if #group > 0 then
                     local rewardName = step.questName or "the reward"
+                    local rewardZone = step.placeName
+                    if type(rewardZone) ~= "string" or rewardZone == "" or rewardZone == "Quests" then
+                        rewardZone = step.segment
+                    end
+                    if type(rewardZone) ~= "string" or rewardZone == "" or rewardZone == "Quests" then
+                        rewardZone = nil
+                    end
                     local prior = {}
-                    local header = "Chain: " .. rewardName
                     for g = 1, #group do
                         local row = group[g]
                         local lead = BlankStep()
@@ -1303,17 +1309,25 @@ local function ExpandChains(raw, gearQuests, side, class)
                         if type(row.map) == "number" and type(row.x) == "number" and type(row.y) == "number" then
                             lead.map, lead.x, lead.y = row.map, row.x, row.y
                         end
-                        if type(row.zone) == "string" and row.zone ~= "" and row.zone ~= "Quests" then
-                            lead.placeName = row.zone
+                        local zone = row.zone
+                        if type(zone) ~= "string" or zone == "" or zone == "Quests" then
+                            zone = rewardZone
+                        end
+                        if type(zone) == "string" and zone ~= "" and zone ~= "Quests" then
+                            lead.placeName = zone
+                            lead.segment = zone
+                            lead.zone = zone
+                        else
+                            lead.segment = "Quests"
+                            lead.zone = "Quests"
                         end
                         lead.giverName = row.giver
-                        lead.segment = header
-                        lead.zone = header
                         lead.title = row.name
                         lead.baseText = (row.sentence or "") .. " This leads to " .. rewardName .. "."
                         if row.alt then
                             lead.baseText = lead.baseText .. " The chain lists this beside other quests. Complete one."
                         end
+                        lead.leadText = lead.baseText
                         lead.text = lead.baseText
                         if g > 1 then lead.chainPrior = CopyNames(prior) end
                         prior[#prior + 1] = row.name
@@ -1322,8 +1336,6 @@ local function ExpandChains(raw, gearQuests, side, class)
                     step.chainGroup = root
                     step.chainPos = #group + 1
                     step.chainPrior = CopyNames(prior)
-                    step.segment = header
-                    step.zone = header
                 end
             end
         end
@@ -2351,8 +2363,23 @@ local function ApplyChains(guide, row)
     for i = 1, #steps do
         local step = steps[i]
         local at = step.chainLead and step.chainGroup and rewardAt[step.chainGroup]
-        if at and i < at then
+        local reward = at and steps[at]
+        if reward and (step.chainPos or 0) < (reward.chainPos or 0) then
             step.visible = true
+            local itemID = reward.itemID
+            local itemName = reward.gearName
+            if step.questID and type(itemID) == "number" and itemID > 0 then
+                step.itemID = itemID
+                step.rewards = { itemID }
+                if type(itemName) == "string" and itemName ~= "" then
+                    step.gearName = itemName
+                    step.title = (step.questName or "Quest") .. ": " .. itemName
+                    local rewardQuest = reward.questName or "the later quest"
+                    local base = step.leadText or ""
+                    step.baseText = base .. " The reward on " .. rewardQuest .. " is " .. itemName .. "."
+                    step.text = step.baseText
+                end
+            end
             if TurnedIn(step.questID) then
                 step.gearState = "done"
                 if row and row.hold ~= i then
@@ -2681,7 +2708,7 @@ local function StepOnIsle(step, cache)
 end
 
 -- Paint order only. Step indexes stay put so checkmarks do not clear.
--- One segment stays one block, in the order it was written.
+-- The header is the zone. A chain stays in that zone, in the order it was written.
 function SG.Gear.DisplayOrder(guide)
     local steps = guide and guide.steps
     if not steps then return {} end
