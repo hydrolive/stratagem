@@ -945,6 +945,19 @@ function SG.Engine.CurrentIndex(guide)
     if not guide then return nil end
     if guide.gear then
         local note
+        local order = SG.Gear and SG.Gear.DisplayOrder and SG.Gear.DisplayOrder(guide)
+        if order then
+            for n = 1, #order do
+                local i = order[n]
+                local step = guide.steps[i]
+                if step.gearNote then
+                    if not note then note = i end
+                elseif not SG.Engine.IsDone(guide, i) then
+                    return i
+                end
+            end
+            return note
+        end
         for i = 1, #guide.steps do
             local step = guide.steps[i]
             if step.visible and step.gearNote then
@@ -976,6 +989,20 @@ function SG.Engine.FirstVisible(guide)
 end
 
 local function Neighbor(guide, index, direction)
+    if guide.gear and SG.Gear and SG.Gear.DisplayOrder then
+        local order = SG.Gear.DisplayOrder(guide)
+        local at
+        for n = 1, #order do
+            if order[n] == index then
+                at = n
+                break
+            end
+        end
+        if not at then
+            if direction < 0 then at = #order + 1 else at = 0 end
+        end
+        return order[at + direction]
+    end
     local i = index
     while true do
         i = i + direction

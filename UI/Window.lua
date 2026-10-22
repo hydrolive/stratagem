@@ -1366,7 +1366,13 @@ function SG.UI.RefreshSteps(resetScroll)
     local last = nil
     local focusAt = nil
     local shown = SG.Engine.ShownIndex(guide)
-    for i = 1, #guide.steps do
+    local order
+    if guide.gear and SG.Gear and SG.Gear.DisplayOrder then
+        order = SG.Gear.DisplayOrder(guide)
+    end
+    local count = order and #order or #guide.steps
+    for n = 1, count do
+        local i = order and order[n] or n
         local step = guide.steps[i]
         if step.visible and listed(step) then
             if step.segment ~= last then

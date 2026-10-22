@@ -638,6 +638,8 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         end
         if event == "PLAYER_LEVEL_UP" and SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
     elseif event == "ZONE_CHANGED_NEW_AREA" then
+        if SG.Gear and SG.Gear.PreferHere then SG.Gear.PreferHere() end
+        if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
         if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
     elseif event == "AUCTION_HOUSE_CLOSED" then
         if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end

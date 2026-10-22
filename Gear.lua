@@ -804,7 +804,7 @@ end
 local AHEAD = 3
 local SOURCE_SEP = " \194\183 "
 
-local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward that is an upgrade lists the earlier quests in that chain under one Chain header. A quest line names the zone, the quest giver, and where to find them when a loaded list has that. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
+local GEAR_BLURB = "Upgrades for the spec you selected. Tabs are Quests, Profession, Auction House, World Drops, and Reputation. A line shows only when that piece beats what you have equipped or in your bags for this spec, within a few levels. A higher item level with the wrong stats is left off. An empty slot counts only when that piece has stats for this spec. The same item level is not an upgrade. Profession is crafts from professions you have. A bind-on-pickup craft stays off until you have that profession. Auction House is bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. World Drops lists world drops and dungeon drops. Reputation is a quartermaster reward, and the hand-ins for that reward stay listed while it is an upgrade and the standing is still short. A quest reward that is an upgrade lists the earlier quests in that chain under one Chain header. A quest line names the zone, the quest giver, and where to find them when a loaded list has that. A world drop names the drop percent and the kills tracked since Stratagem started counting. This does not choose a zone path."
 
 local function Namespace()
     return SG.BiS and SG.BiS.ns or nil
@@ -1842,9 +1842,12 @@ local function ArmorTier(class, fact, level)
     return SG.Gear.Usable(class, fact, level or 1) or 0
 end
 
--- nil when either side is uncached. true only when cand is a real upgrade.
+-- nil while the candidate is still uncached. A cached score of 0 has no
+-- spec stats, so it does not fill an empty slot and it does not replace
+-- a worn piece. Item level and armor tier do not promote that piece.
 local function Beats(cand, bar)
     if not cand or not cand.known then return nil end
+    if (cand.score or 0) <= 0 then return false end
     if not bar then return true end
     if not bar.known then return nil end
     if cand.score > bar.score and cand.armor >= bar.armor then return true end
@@ -2517,6 +2520,7 @@ function SG.Gear.Filter(guide)
     end
     ApplyChains(guide, row)
     if SG.Reputation and SG.Reputation.Fold then SG.Reputation.Fold(guide) end
+    if SG.Gear.FoldIsle then SG.Gear.FoldIsle(guide) end
     any = false
     for i = 1, #guide.steps do
         local step = guide.steps[i]
@@ -2582,6 +2586,205 @@ function SG.Gear.RebuildGuides()
     end
     if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
     if SG.Tracker and SG.Tracker.Update then SG.Tracker.Update() end
+end
+
+-- Catalog map for Zephras Isle. Route.lua uses the same id.
+local ISLE_MAP = 2521
+
+local function SameZone(text, zone)
+    if type(text) ~= "string" or type(zone) ~= "string" then return false end
+    if text == "" or zone == "" then return false end
+    return text:lower() == zone:lower()
+end
+
+local function MapParent(mapID, cache)
+    if type(mapID) ~= "number" or mapID <= 0 then return nil end
+    if cache then
+        local known = cache[mapID]
+        if known ~= nil then
+            if known == false then return nil end
+            return known
+        end
+    end
+    local parent
+    if C_Map and C_Map.GetMapInfo then
+        local info = C_Map.GetMapInfo(mapID)
+        parent = info and info.parentMapID or nil
+    end
+    if type(parent) ~= "number" or parent <= 0 or parent == mapID then parent = nil end
+    if cache then cache[mapID] = parent or false end
+    return parent
+end
+
+-- map, zone name, and that map's parent. A cave climbs to the named zone
+-- so a Durotar quest still matches while the character is indoors.
+function SG.Gear.PlayerZone()
+    local map
+    if C_Map and C_Map.GetBestMapForUnit then
+        map = C_Map.GetBestMapForUnit("player")
+    end
+    local name
+    if GetRealZoneText then name = GetRealZoneText() end
+    if type(name) ~= "string" or name == "" then
+        if GetZoneText then name = GetZoneText() end
+    end
+    if type(name) ~= "string" or name == "" then name = nil end
+    local parent
+    if map and C_Map and C_Map.GetMapInfo then
+        local info = C_Map.GetMapInfo(map)
+        local guard = 0
+        while info and guard < 6 do
+            guard = guard + 1
+            if not name and type(info.name) == "string" and info.name ~= "" then
+                name = info.name
+            end
+            parent = info.parentMapID
+            local titled = type(info.name) == "string" and name and info.name:lower() == name:lower()
+            if titled then break end
+            local up = info.parentMapID
+            if type(up) ~= "number" or up <= 0 or up == map then break end
+            map = up
+            info = C_Map.GetMapInfo(map)
+        end
+    end
+    if type(parent) ~= "number" or parent <= 0 or parent == map then parent = nil end
+    return map, name, parent
+end
+
+function SG.Gear.OnIsle()
+    local map, name, parent = SG.Gear.PlayerZone()
+    if map == ISLE_MAP or parent == ISLE_MAP then return true end
+    return SameZone(name, "Zephras Isle")
+end
+
+-- 0 is the zone the character is in. 1 shares that map's parent. 2 is farther.
+-- The parent comes from C_Map. No neighbor list is stored.
+function SG.Gear.ZoneRank(step, hereMap, hereName, hereParent, cache)
+    if not step then return 2 end
+    if SameZone(step.placeName, hereName) or SameZone(step.segment, hereName) then return 0 end
+    local mapID = step.map
+    if type(mapID) ~= "number" or mapID <= 0 then return 2 end
+    if hereMap and mapID == hereMap then return 0 end
+    if hereParent and mapID == hereParent then return 0 end
+    local parent = MapParent(mapID, cache)
+    if hereMap and parent == hereMap then return 1 end
+    if hereParent and parent and parent == hereParent then return 1 end
+    return 2
+end
+
+local function StepOnIsle(step, cache)
+    if step.map == ISLE_MAP then return true end
+    if MapParent(step.map, cache) == ISLE_MAP then return true end
+    local place = step.placeName
+    if type(place) ~= "string" or place == "" then place = step.segment end
+    return SameZone(place, "Zephras Isle")
+end
+
+-- Paint order only. Step indexes stay put so checkmarks do not clear.
+-- One segment stays one block, in the order it was written.
+function SG.Gear.DisplayOrder(guide)
+    local steps = guide and guide.steps
+    if not steps then return {} end
+    local hereMap, hereName, hereParent = SG.Gear.PlayerZone()
+    local cache = {}
+    local onIsle = hereMap == ISLE_MAP or hereParent == ISLE_MAP or SameZone(hereName, "Zephras Isle")
+    local race = SG.raceID
+    local pushIsle = (not onIsle) and (race == 2 or race == 6 or race == 8)
+    local groups, keys = {}, {}
+    for i = 1, #steps do
+        local step = steps[i]
+        if step.visible then
+            local key = step.segment or ""
+            local group = groups[key]
+            if not group then
+                group = { first = i, rank = 2, indexes = {} }
+                groups[key] = group
+                keys[#keys + 1] = key
+            end
+            group.indexes[#group.indexes + 1] = i
+            local rank = SG.Gear.ZoneRank(step, hereMap, hereName, hereParent, cache)
+            if pushIsle and rank < 2 and StepOnIsle(step, cache) then rank = 2 end
+            if rank < group.rank then group.rank = rank end
+        end
+    end
+    table.sort(keys, function(a, b)
+        local ga, gb = groups[a], groups[b]
+        if ga.rank ~= gb.rank then return ga.rank < gb.rank end
+        return ga.first < gb.first
+    end)
+    local out = {}
+    for g = 1, #keys do
+        local indexes = groups[keys[g]].indexes
+        for n = 1, #indexes do
+            out[#out + 1] = indexes[n]
+        end
+    end
+    return out
+end
+
+-- Move the gear cursor only when the listed step is in a closer zone.
+-- A Prev hold stays. Equipping gear does not call this.
+function SG.Gear.PreferHere()
+    if not SG.Engine or not SG.Engine.Active or not SG.char then return end
+    local guide = SG.Engine.Active()
+    if not guide or not guide.gear or not guide.steps then return end
+    local row = SG.Engine.Progress and SG.Engine.Progress(guide.id)
+    if not row or row.hold then return end
+    local nextIndex = SG.Engine.CurrentIndex(guide)
+    if not nextIndex or nextIndex == row.cursor then return end
+    local current = row.cursor and guide.steps[row.cursor]
+    if current and current.visible and not SG.Engine.IsDone(guide, row.cursor) then
+        local hereMap, hereName, hereParent = SG.Gear.PlayerZone()
+        local cache = {}
+        local cursorRank = SG.Gear.ZoneRank(current, hereMap, hereName, hereParent, cache)
+        local nextRank = SG.Gear.ZoneRank(guide.steps[nextIndex], hereMap, hereName, hereParent, cache)
+        if not (nextRank < cursorRank) then return end
+    end
+    row.cursor = nextIndex
+    if SG.state then SG.state.stepIndex = nextIndex end
+    if SG.Nav and SG.Nav.following and SG.Nav.Set then
+        SG.Nav.Set(guide.steps[nextIndex])
+    elseif SG.Tracker and SG.Tracker.Update then
+        SG.Tracker.Update()
+    end
+end
+
+-- Orc (2), tauren (6), and troll (8) level on the mainland. Hide a Zephras
+-- Isle upgrade when another visible upgrade already covers that slot.
+-- Skyborne stays. The isle stays when it is the only upgrade, or when the
+-- character is standing on it. This does not mark the line done.
+function SG.Gear.FoldIsle(guide)
+    local race = SG.raceID
+    if race ~= 2 and race ~= 6 and race ~= 8 then return end
+    if SG.Gear.OnIsle() then return end
+    local steps = guide and guide.steps
+    if not steps then return end
+    local cache = {}
+    local covered = {}
+    for i = 1, #steps do
+        local step = steps[i]
+        if step.visible and step.gearState == "show" and not step.chainLead and not StepOnIsle(step, cache) then
+            if step.slot then covered[step.slot] = true end
+        end
+    end
+    local hidden = {}
+    for i = 1, #steps do
+        local step = steps[i]
+        if step.visible and step.gearState == "show" and not step.chainLead and StepOnIsle(step, cache) then
+            if step.slot and covered[step.slot] then
+                step.visible = false
+                step.gearState = "wait"
+                if step.chainGroup then hidden[step.chainGroup] = true end
+            end
+        end
+    end
+    for i = 1, #steps do
+        local step = steps[i]
+        if step.chainLead and step.chainGroup and hidden[step.chainGroup] then
+            step.visible = false
+            step.gearState = "wait"
+        end
+    end
 end
 
 local function NoteKill()
