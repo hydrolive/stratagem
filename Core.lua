@@ -27,12 +27,9 @@ SG.DB_DEFAULTS = {
         y = 0,
         tracker = { point = "BOTTOM", rel = "BOTTOM", x = 280, y = 210 },
         pins = { point = "TOPRIGHT", rel = "TOPRIGHT", x = -20, y = -220 },
-        arrow = { point = "CENTER", rel = "CENTER", x = 0, y = 230 },
     },
     options = {
         tomtom = true,
-        arrow = true,
-        invertArrow = false,
         autoAdvance = true,
         onlyMySpec = true,
         minimap = true,
@@ -430,8 +427,8 @@ function SG.OnLogin()
     if SG.Route and SG.Route.ActiveId then
         route = SG.Engine.Get(SG.Route.ActiveId())
     end
-    -- Gear is the open list. A saved dungeon or profession must not keep the arrow
-    -- while the window is showing upgrades.
+    -- Gear is the open list. A saved dungeon or profession must not keep the
+    -- waypoint while the window is showing upgrades.
     local assigned = false
     if SG.db.category == "leveling" then
         if route then
@@ -462,7 +459,6 @@ function SG.OnLogin()
     SG.Minimap.Create()
     SG.Tracker.Create()
     if SG.Pins and SG.Pins.Create then SG.Pins.Create() end
-    SG.Arrow.Create()
     if active and SG.db.category ~= "bis" then
         local index = SG.Engine.ShownIndex(active)
         if index then SG.Engine.Focus(active, index, true) end
@@ -526,9 +522,6 @@ local function Slash(msg)
         SG.Engine.Nudge(0)
     elseif command == "wp" or command == "waypoint" then
         SG.Engine.WaypointCurrent()
-    elseif command == "arrowflip" then
-        SG.db.options.invertArrow = not SG.db.options.invertArrow
-        SG.Print(SG.db.options.invertArrow and "Arrow mirrored." or "Arrow set back.")
     elseif command == "status" then
         local spec = SG.Specs.Label(SG.Specs.Selected())
         SG.Print(spec .. ". " .. SG.BiS.Status())
@@ -568,7 +561,7 @@ local function Slash(msg)
         if SG.UI.Refresh then SG.UI.Refresh(false) end
         if SG.Tracker.Update then SG.Tracker.Update() end
     else
-        SG.Print("Commands: show, hide, tracker, next, prev, done, waypoint, spec, status, reset, reset all, arrowflip")
+        SG.Print("Commands: show, hide, tracker, next, prev, done, waypoint, spec, status, reset, reset all")
     end
 end
 
@@ -636,11 +629,10 @@ SG.eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         if event == "PLAYER_LEVEL_UP" and SG.Engine and SG.Engine.Active and SG.Engine.AimForward then
             SG.Engine.AimForward(SG.Engine.Active())
         end
-        if event == "PLAYER_LEVEL_UP" and SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         if SG.Gear and SG.Gear.PreferHere then SG.Gear.PreferHere() end
         if SG.UI and SG.UI.Refresh then SG.UI.Refresh(false) end
-        if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
+        if SG.Nav and SG.Nav.Follow then SG.Nav.Follow() end
     elseif event == "AUCTION_HOUSE_CLOSED" then
         if SG.Recipes and SG.Recipes.Refresh then SG.Recipes.Refresh() end
     elseif event == "COMPANION_LEARNED" or event == "NEW_PET_ADDED" or event == "NEW_TOY_ADDED" then

@@ -13,7 +13,7 @@ The window is a dark navy browser: categories on the left, the gear list or a gu
    - **Polestar** and **Polestar_Guides** (Polestar_Codex, Polestar_Nav, and Polestar_QuestDB sit beside them). While those are enabled, faction speed routes, profession 1–300 routes, and the Leveling category come from the guides Polestar has loaded. Stratagem does not copy those guides, and it does not download a WoWhead dump.
    - **QuestieDB**. Quest rewards that are not in the bundled catalog, such as the leather waist on The Hunt Begins, are named from QuestieDB. Without it, those quests are left off the Gear list. Catalog quests still name their rewards.
    - **OpenMap**, for the world map. Set waypoint marks the step on that map when the step has a point.
-   - **TomTom**, for a minimap and world arrow. Without it, Stratagem shows coordinates and its own on-screen arrow. The OpenMap marker does not need TomTom.
+   - **TomTom**, for the arrow, the minimap pin, and the world pin. Stratagem does not draw its own arrow. The OpenMap marker does not need TomTom.
 
 `/reload` after enabling. Open the window with `/sg` or the minimap button.
 
@@ -27,7 +27,7 @@ Log into the `_forever_` client with Stratagem enabled.
 4. With the dungeon journal loaded, a dungeon line names the item, the boss, and a percent, and the detail pane shows the item. Trash has no percent. Without the journal, those lines are absent.
 5. Profession shows crafts from professions you have. A bind-on-pickup craft from a profession you do not have stays off. Auction House shows bind-on-equip crafts from professions you do not have, and bind-on-equip world drops. A world drop names the percent, about how many kills that takes, and how many of that mob Stratagem has recorded. If the drop list has no percent, the line says so. That count is not a lifetime total from before the addon was recording. Dungeon drops are on World Drops and still name the boss and the journal percent. Vendor gear is not listed. Reputation on Gear shows a journal reward that beats what you have on, within 3 levels, under that faction's name. The hand-ins for it stay listed until your standing already covers the rewards that are showing. Handing one in does not finish the step. The name, place, price, and mobs come from the dungeon journal. Open the Reputation category. A faction Polestar routes lists that speed route, grouped by standing, through exalted. The open step shows the standing bar the client reports. Earlier standings are marked done. A faction with no Polestar route still lists the journal quartermaster and turn-ins. Open Professions. Guides sits under the window tabs, then one tab for each profession you have recipes for. Guides lists one 1–300 guide per profession you have, and those profession tabs are not extra rows there. With Polestar enabled, a 1–300 guide follows that route, and a craft names the recipe and reagents the route lists. Ranges below your skill are already marked done. Without that route, the header is the zones the older lists name. A profession tab lists only that profession. Vendor, quest, and world-drop lines are grouped by that source, then the zone or dungeon the list names. A reputation line is grouped as the faction and Vendor. Learn one and it leaves. Turning the quest in does not. Trainer recipes are not on Recipes. A profession with no zone on the 1–300 list is one note. No zone or recipe is invented. Adding the quest lines clears old Recipes checkmarks once. Open Leveling, beside Gear. It lists Polestar's zone routes for your faction, including brackets that go to 60. Gear does not open one of those routes for you.
 6. On an empty slot the line can say Level BiS in gold. When a stronger piece for that slot is already available, it says Upgrade in green. The detail pane and the tracker show the item icon. Mouse over the icon.
-7. The HUD arrow should show the step name, a direction, and a yard distance. Walk the way it points and the yards should go down. Next and Prev should retarget it. Left-click drag should move it, and a reload should keep that spot. `/sg arrowflip` mirrors it. Right-click the tracker or the arrow opens Gear. With TomTom enabled, a pin is dropped as well, and the HUD arrow stays. Set waypoint on a step that has coordinates marks that point on OpenMap. Open the map and the marker is there.
+7. With TomTom enabled, the current step drops a TomTom waypoint, and TomTom's arrow points at it. Next, Prev, Done, and a click on a step move that pin. There is no Stratagem arrow on the screen. Set waypoint on a step that has coordinates marks that point on OpenMap. Open the map and the marker is there. Right-click the tracker opens Gear.
 8. On Gear's Quests tab, a quest reward and a chain lead name the zone, the quest giver, and where to find them when the catalog, the journal, or QuestieDB has that. A missing part says the list does not name it. The line under the quest shows the giver and the coordinates when those exist.
 9. Level 60 BiS, just above Options, lists a step per slot. With Naowh loaded it names the rank-1 item and where it comes from. A drop, an auction piece, or a quest reward shows the item icon on the step row. The optional enchant line names the enchant for that rank 1 piece, or says the list has none. The detail line shows your gear score against the score of those pieces. Attunements lists Onyxia for your faction and Molten Core. Open one and walk the steps.
 10. `/sg status` should say whether the live Naowh journal loaded or the bundled snapshot (131 quests, about level 6–34) is in use.
@@ -50,7 +50,7 @@ There is no Dungeons category. Dungeon drops stay on Gear's World Drops tab, one
 
 Wrong class, race, or faction is hidden. **Hide rewards meant for other specs** still applies to the other categories. On Gear, a line shows when the item is an upgrade this class can wear. Changing spec can change which choice a quest names. Equipping gear marks an outgrown quest line Done and leaves it on the list. On the other tabs it hides the line. The step list itself is rebuilt when reward data arrives, not on every equip. Level 60 BiS rewrites its item names when you change spec. The number of slots stays the same.
 
-Right-click the tracker, or the HUD arrow, to open Gear. In a guide list, double-click or **Continue** opens that guide and sets the waypoint. There is no favorite and no guide tab. The search box filters the steps of the open guide, or the guide list when you are not in one. A step row shows the item icon, then the step title. **Pin** adds that step to a separate window, with its quest objectives or the step text. The main tracker stays on the active guide until you press **Open** on a pin.
+Right-click the tracker to open Gear. In a guide list, double-click or **Continue** opens that guide and sets the waypoint. There is no favorite and no guide tab. The search box filters the steps of the open guide, or the guide list when you are not in one. A step row shows the item icon, then the step title. **Pin** adds that step to a separate window, with its quest objectives or the step text. The main tracker stays on the active guide until you press **Open** on a pin.
 
 ## Level 60 BiS and attunements
 
@@ -62,13 +62,13 @@ Right-click the tracker, or the HUD arrow, to open Gear. In a guide list, double
 
 ## Navigation
 
-The HUD arrow points at the step the tracker is on and shows that step's name and the distance in yards. The direction and the distance are the same vector, so walking toward the arrow brings the number down. Next, Prev, Done, and a click on a step move it. Left-click and drag to place it somewhere else. That spot is remembered. Right-click opens Gear. `/sg arrowflip` mirrors it (left becomes right) if the texture feels backwards. TomTom can still drop a pin at the same time. The arrow stays up either way. A step with no map coordinates does not raise it. A dungeon Run step points at the entrance from the dungeon journal. Several quests in one camp share a pin, so the direction stays put until the route leaves that pin. The name under the arrow still changes.
+TomTom draws the arrow. Stratagem puts a waypoint on the step the tracker is on when TomTom is installed and the TomTom option is on. Next, Prev, Done, and a click on a step move that waypoint. A step with no map coordinates does not drop a pin. A dungeon Run step pins the entrance from the dungeon journal. Several quests in one camp share a pin, so TomTom stays on that point until the route leaves it. The tracker still prints the yard distance beside the coordinates.
 
 With TomTom enabled, the current step drops a waypoint when the quest has a map id. Coordinates in the journal are 0–100 and are converted for TomTom. The quest is also super-tracked in the quest log when that option is on.
 
 Some turn-ins name a place in the text but have no map id (Grimand's Armor is one). Those steps show the written coordinates and do not drop a pin. The map id is not guessed.
 
-Distance and direction use HereBeDragons when TomTom brought it: one world vector from you to the pin. Otherwise the client's world position is used with the same angle. On the same map, if neither is available, the number is an estimate (42 yards per map percent) and the arrow still uses that same angle, with north opposite the map's downward y. From another zone the arrow still shows the distance when a world position exists.
+The yard number on the tracker uses HereBeDragons when TomTom brought it: one world vector from you to the pin. Otherwise the client's world position is used. On the same map, if neither is available, the number is an estimate (42 yards per map percent). TomTom's own arrow uses TomTom's distance.
 
 ## Slash commands
 
@@ -85,7 +85,6 @@ Distance and direction use HereBeDragons when TomTom brought it: one world vecto
 | `/sg status` | Spec, and whether live BiS data loaded |
 | `/sg reset` | Clear the current guide |
 | `/sg reset all` | Clear every guide on this character |
-| `/sg arrowflip` | Mirror the on-screen arrow |
 
 A keybind, **Toggle Stratagem**, is under the Stratagem header in the game's keybind menu.
 
@@ -118,7 +117,7 @@ The script reads `NaowhForever_DungeonJournal\Data\BiSQuests.lua` and `NaowhFore
 
 ## Icons
 
-Category icons, the arrow, and the main icon are 32-bit TGA files in `Media\`. Rebuild them from the Imagine sources with:
+Category icons and the main icon are 32-bit TGA files in `Media\`. Rebuild them from the Imagine sources with:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\export_icons.ps1
@@ -136,10 +135,6 @@ Category sheet:
 
 > A game UI icon sheet on a flat pure magenta background, two rows of five equal square icons with wide even gaps and nothing touching. Every icon is the same dark navy rounded medallion with a thin gold rim and a single gold-and-violet metallic symbol. Top row: four small window panes, a sword rising along an upward chevron, a blacksmith anvil, a hanging banner, a compass rose. Bottom row: an hourglass, a cut gemstone, a stone dungeon archway, a five-point star, a cogwheel.
 
-Arrow:
-
-> A single game UI arrow icon centered on a flat pure magenta background. A bold upward chevron made of polished gold metal with a violet edge highlight. Dark World of Warcraft interface art, crisp edges, no text, no letters, no extra shapes.
-
 ## Layout
 
 ```
@@ -153,7 +148,7 @@ Engine.lua             steps, filters, progress
 Guides.lua             zone sources, professions, and dynamic guide defs
 Legacy.lua             one guide per client Legacy achievement that awards a point
 Route.lua              Level 60 BiS, attunements, and zone sources Gear does not open
-Nav.lua                TomTom, super-track, on-screen arrow
+Nav.lua                TomTom and super-track
 Data\Quests.lua        generated quest snapshot
 Data\ItemSpecs.lua     generated spec rankings
 Data\RecipeDrops.lua   Forever Guide recipe mob, classic percent, zone or instance, and map point

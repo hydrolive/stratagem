@@ -1020,7 +1020,7 @@ local function Neighbor(guide, index, direction)
     end
 end
 
--- The step the tracker and the arrow are actually on. CurrentIndex is the
+-- The step the tracker and TomTom are actually on. CurrentIndex is the
 -- first required step that is not done, so it cannot move backward.
 function SG.Engine.ShownIndex(guide)
     if not guide then return nil end

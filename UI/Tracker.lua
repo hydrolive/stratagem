@@ -318,7 +318,7 @@ function SG.Tracker.Update()
     if not SG.db.options.tracker then
         frame:Hide()
         SG.Tracker.updating = false
-        if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
+        if SG.Nav and SG.Nav.Follow then SG.Nav.Follow() end
         return
     end
     local guide = SG.Engine.Active()
@@ -350,7 +350,7 @@ function SG.Tracker.Update()
         frame.coord:SetText("Open Gear once the addon has finished loading.")
         frame.bar:SetPercent(0)
         SG.Tracker.updating = false
-        if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
+        if SG.Nav and SG.Nav.Follow then SG.Nav.Follow() end
         return
     end
     frame:Show()
@@ -457,5 +457,5 @@ function SG.Tracker.Update()
     end
     SG.Tracker.updating = false
     if SG.Pins and SG.Pins.Update and not SG.Pins.painting then SG.Pins.Update() end
-    if SG.Arrow and SG.Arrow.Tick then SG.Arrow.Tick() end
+    if SG.Nav and SG.Nav.Follow then SG.Nav.Follow() end
 end

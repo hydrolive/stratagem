@@ -751,14 +751,7 @@ function SG.UI.BuildOptions(parent)
     end)
     checks[#checks + 1] = addCheck("TomTom waypoint on the current step", function() return SG.db.options.tomtom end, function(on)
         SG.db.options.tomtom = on
-        SG.Arrow.Tick()
-    end)
-    checks[#checks + 1] = addCheck("HUD arrow with direction and distance", function() return SG.db.options.arrow end, function(on)
-        SG.db.options.arrow = on
-        SG.Arrow.Tick()
-    end)
-    checks[#checks + 1] = addCheck("Invert the arrow", function() return SG.db.options.invertArrow end, function(on)
-        SG.db.options.invertArrow = on
+        if SG.Nav and SG.Nav.Follow then SG.Nav.Follow(true) end
     end)
     checks[#checks + 1] = addCheck("Super-track the quest in the quest log", function() return SG.db.options.superTrack end, function(on)
         SG.db.options.superTrack = on
